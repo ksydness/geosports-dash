@@ -2,18 +2,32 @@
 
 import { useEffect, useRef } from 'react';
 
-interface Props {
-  groupCode: string;
+interface ScoreEntry {
+  date: string;
+  username: string;
+  score: number;
+  rawScores?: number[];
 }
 
-export default function Dashboard({ groupCode }: Props) {
+interface InitialData {
+  group_name: string;
+  scores: ScoreEntry[];
+  active: boolean;
+}
+
+interface Props {
+  groupCode: string;
+  initialData?: InitialData;
+}
+
+export default function Dashboard({ groupCode, initialData }: Props) {
   const initialized = useRef(false);
 
   useEffect(() => {
     if (initialized.current) return;
     initialized.current = true;
-    initDashboard(groupCode);
-  }, [groupCode]);
+    initDashboard(groupCode, initialData);
+  }, [groupCode, initialData]);
 
   return (
     <>
@@ -42,7 +56,7 @@ export default function Dashboard({ groupCode }: Props) {
 
 // ─── Dashboard logic ──────────────────────────────────────────────────────────
 
-function initDashboard(groupCode: string) {
+function initDashboard(groupCode: string, initialData?: InitialData) {
   const Q_MULTIPLIERS = [1, 1, 2, 3, 3];
   const Q_MAX_PTS     = [100, 100, 200, 300, 300];
 
@@ -55,6 +69,17 @@ function initDashboard(groupCode: string) {
   // ── Data loading ─────────────────────────────────────────────────────────────
 
   async function loadScores() {
+    // If pre-loaded demo data was provided, use it directly — no fetch needed
+    if (initialData) {
+      allScores = initialData.scores || [];
+      lastFetched = new Date();
+      const title = document.getElementById('groupTitle');
+      if (title) title.textContent = initialData.group_name || groupCode;
+      renderTab(currentTab);
+      renderFooter();
+      return;
+    }
+
     setContent('<div class="loading">Loading scores…</div>');
     try {
       const res = await fetch(`/api/scores/${groupCode}`);
@@ -461,9 +486,14 @@ function initDashboard(groupCode: string) {
   }
 
   function renderFooter() {
-    const t = lastFetched?.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}) || '';
     const el = document.getElementById('footer');
-    if (el) el.innerHTML = `Updated ${t} · <button class="sync-btn" onclick="refreshNow()">↻ Refresh</button>`;
+    if (!el) return;
+    if (initialData) {
+      el.innerHTML = `<span style="color:#3b82f6;font-weight:600;">Demo Mode</span> · <a href="/" style="color:var(--muted);text-decoration:none;">Set up your group →</a>`;
+    } else {
+      const t = lastFetched?.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}) || '';
+      el.innerHTML = `Updated ${t} · <button class="sync-btn" onclick="refreshNow()">↻ Refresh</button>`;
+    }
   }
 
   // ── Boot ──────────────────────────────────────────────────────────────────────

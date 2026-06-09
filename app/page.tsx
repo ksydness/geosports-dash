@@ -126,6 +126,10 @@ export default function Home() {
       <p style={styles.footer}>
         Scores sync automatically. Share the link with your group once it&apos;s ready.
       </p>
+
+      <a href="/g/demo" style={styles.demoLink}>
+        👀 See a demo first
+      </a>
     </div>
   );
 }
@@ -224,5 +228,13 @@ const styles: Record<string, React.CSSProperties> = {
     color: '#6b7a99',
     marginTop: 20,
     textAlign: 'center',
+  },
+  demoLink: {
+    display: 'inline-block',
+    marginTop: 14,
+    fontSize: 13,
+    color: '#6b7a99',
+    textDecoration: 'none',
+    borderBottom: '1px dotted #6b7a99',
   },
 };
