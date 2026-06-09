@@ -523,10 +523,10 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
     return new Promise((resolve) => {
       const link = document.createElement('link');
       link.rel = 'stylesheet';
-      link.href = 'https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.css';
+      link.href = 'https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.css';
       document.head.appendChild(link);
       const script = document.createElement('script');
-      script.src = 'https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.js';
+      script.src = 'https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.js';
       script.onload = () => { maplibreLoaded = true; resolve(); };
       document.head.appendChild(script);
     });
