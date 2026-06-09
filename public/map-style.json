@@ -23,6 +23,7 @@
   },
   "glyphs": "https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf",
   "sky": {},
+  "projection": {"type": "globe"},
   "layers": [
     {
       "id": "satellite",
