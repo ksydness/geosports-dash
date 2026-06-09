@@ -34,8 +34,8 @@ export default function Dashboard({ groupCode, initialData }: Props) {
       <style>{CSS}</style>
       <div id="app">
         <div className="header">
-          <div className="header-logo">ð</div>
-          <h1 id="groupTitle">Loadingâ¦</h1>
+          <div className="header-logo">Ã°ÂÂÂ</div>
+          <h1 id="groupTitle">LoadingÃ¢ÂÂ¦</h1>
           <p>GeoSports Dashboard</p>
         </div>
         <div className="tabs">
@@ -46,7 +46,7 @@ export default function Dashboard({ groupCode, initialData }: Props) {
           <div className="tab" data-tab="stats" onClick={() => (window as any).switchTab('stats')}>Stats</div>
         </div>
         <div className="content">
-          <div id="tabContent"><div className="loading">Loading scoresâ¦</div></div>
+          <div id="tabContent"><div className="loading">Loading scoresÃ¢ÂÂ¦</div></div>
           <div className="footer" id="footer"></div>
         </div>
       </div>
@@ -55,7 +55,7 @@ export default function Dashboard({ groupCode, initialData }: Props) {
       <div id="mapModal" className="map-modal" style={{display:'none'}}>
         <div className="map-modal-bar">
           <span id="mapModalTitle" className="map-modal-title"></span>
-          <button className="map-modal-close" onClick={() => (window as any).closeMapReview()}>â</button>
+          <button className="map-modal-close" onClick={() => (window as any).closeMapReview()}>Ã¢ÂÂ</button>
         </div>
         <div id="mapContainer" className="map-container"></div>
         <div id="mapInfoPanel" className="map-info-panel"></div>
@@ -64,7 +64,7 @@ export default function Dashboard({ groupCode, initialData }: Props) {
   );
 }
 
-// âââ Dashboard logic ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+// Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂ Dashboard logic Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
 
 function initDashboard(groupCode: string, initialData?: InitialData) {
   const Q_MULTIPLIERS = [1, 1, 2, 3, 3];
@@ -76,10 +76,10 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
   let lastFetched: Date | null = null;
   let openEntry: string | null = null;
 
-  // ââ Data loading âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+  // Ã¢ÂÂÃ¢ÂÂ Data loading Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
 
   async function loadScores() {
-    // If pre-loaded demo data was provided, use it directly â no fetch needed
+    // If pre-loaded demo data was provided, use it directly Ã¢ÂÂ no fetch needed
     if (initialData) {
       allScores = initialData.scores || [];
       lastFetched = new Date();
@@ -90,7 +90,7 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
       return;
     }
 
-    setContent('<div class="loading">Loading scoresâ¦</div>');
+    setContent('<div class="loading">Loading scoresÃ¢ÂÂ¦</div>');
     try {
       const res = await fetch(`/api/scores/${groupCode}`);
       const data = await res.json();
@@ -121,12 +121,12 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
   function showInactiveBanner() {
     const banner = document.createElement('div');
     banner.style.cssText = 'background:rgba(251,191,36,0.1);border:1px solid rgba(251,191,36,0.3);border-radius:8px;padding:10px 14px;font-size:12px;color:#fde68a;margin-bottom:12px;';
-    banner.textContent = 'â ï¸ Sync paused â session token expired. Update your token to resume.';
+    banner.textContent = 'Ã¢ÂÂ Ã¯Â¸Â Sync paused Ã¢ÂÂ session token expired. Update your token to resume.';
     const content = document.getElementById('tabContent');
     if (content) content.prepend(banner);
   }
 
-  // ââ Exposed globals âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+  // Ã¢ÂÂÃ¢ÂÂ Exposed globals Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
 
   (window as any).switchTab = function(tab: string) {
     currentTab = tab;
@@ -154,12 +154,12 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
 
   (window as any).refreshNow = async function() {
     const btn = document.querySelector('.sync-btn') as HTMLButtonElement;
-    if (btn) { btn.textContent = 'â» Syncingâ¦'; btn.disabled = true; }
+    if (btn) { btn.textContent = 'Ã¢ÂÂ» SyncingÃ¢ÂÂ¦'; btn.disabled = true; }
     await loadScores();
-    if (btn) { btn.textContent = 'â» Refresh'; btn.disabled = false; }
+    if (btn) { btn.textContent = 'Ã¢ÂÂ» Refresh'; btn.disabled = false; }
   };
 
-  // ââ Date utils ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+  // Ã¢ÂÂÃ¢ÂÂ Date utils Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
 
   function toDateStr(d: Date) {
     return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
@@ -173,15 +173,15 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
       const dow = d.getDay();
       d.setDate(d.getDate() + (dow === 0 ? -6 : 1 - dow));
       const s = toDateStr(d);
-      return { start: s, end: todayStr, label: `${s} â ${todayStr}` };
+      return { start: s, end: todayStr, label: `${s} Ã¢ÂÂ ${todayStr}` };
     }
     if (tab === 'month') {
       const s = toDateStr(new Date(today.getFullYear(), today.getMonth(), 1));
-      return { start: s, end: todayStr, label: `${s} â ${todayStr}` };
+      return { start: s, end: todayStr, label: `${s} Ã¢ÂÂ ${todayStr}` };
     }
     const dates = allScores.map(s => s.date).sort();
     const s = dates[0] || '2020-01-01';
-    return { start: s, end: todayStr, label: `${s} â ${todayStr}` };
+    return { start: s, end: todayStr, label: `${s} Ã¢ÂÂ ${todayStr}` };
   }
   function formatDisplayDate(dateStr: string) {
     const [, m, d] = dateStr.split('-').map(Number);
@@ -189,7 +189,7 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
     return `${months[m-1]} ${d}`;
   }
 
-  // ââ Tier helpers ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+  // Ã¢ÂÂÃ¢ÂÂ Tier helpers Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
 
   function tierClass(r: number) {
     if (r >= 100) return 'tier-perfect';
@@ -219,7 +219,7 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
     return 'tier-low';
   }
 
-  // ââ Breakdown builders ââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+  // Ã¢ÂÂÃ¢ÂÂ Breakdown builders Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
 
   function buildTodayBreakdown(rawScores: number[], date: string, groupAvgs: number[] | null) {
     if (rawScores.length !== 5) return '';
@@ -250,7 +250,7 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
       const tc = totalTierClass(d.score, 1000);
       const dots = (d.rawScores || []).map(r => `<div class="mini-dot ${dotClass(r)}"></div>`).join('');
       const mapIcon = !initialData
-        ? `<button class="day-map-icon" onclick="event.stopPropagation();openMapReview('${d.date}')" title="View on map">ð</button>`
+        ? `<button class="day-map-icon" onclick="event.stopPropagation();openMapReview('${d.date}')" title="View on map">Ã°ÂÂÂ</button>`
         : '';
       return `<div class="day-row">
         <div class="day-date-lbl">${formatDisplayDate(d.date)}</div>
@@ -287,7 +287,7 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
     </div>`;
   }
 
-  // ââ Stats âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+  // Ã¢ÂÂÃ¢ÂÂ Stats Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
 
   function getWeekKey(dateStr: string) {
     const d = new Date(dateStr + 'T00:00:00');
@@ -352,7 +352,7 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
     return stats;
   }
 
-  // ââ Renderers âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+  // Ã¢ÂÂÃ¢ÂÂ Renderers Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
 
   function setContent(html: string) {
     const el = document.getElementById('tabContent');
@@ -395,7 +395,7 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
     const totalDays = isToday?null:[...new Set(filtered.map(s=>s.date))].length;
     const avgScore = played.length?Math.round(played.reduce((s,e)=>s+(e.avg??0),0)/played.length):null;
     const mapBtn = !initialData
-      ? `<button class="map-review-btn" onclick="openMapReview('${start}')">ðº Map</button>`
+      ? `<button class="map-review-btn" onclick="openMapReview('${start}')">Ã°ÂÂÂº Map</button>`
       : '';
     let html = `<div class="period-label-row"><span class="period-label">${label}</span>${isToday ? mapBtn : ''}</div>`;
     if (!isToday && played.length>0) {
@@ -412,8 +412,8 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
       let playedRank = 0;
       entries.forEach(e => {
         let rankStr: string;
-        if (e.played) { playedRank++; rankStr = playedRank===1?'ð¥':playedRank===2?'ð¥':playedRank===3?'ð¥':`${playedRank}`; }
-        else rankStr = 'â';
+        if (e.played) { playedRank++; rankStr = playedRank===1?'Ã°ÂÂ¥Â':playedRank===2?'Ã°ÂÂ¥Â':playedRank===3?'Ã°ÂÂ¥Â':`${playedRank}`; }
+        else rankStr = 'Ã¢ÂÂ';
         const initials = e.username.split(/\s+/).map((w:string)=>w[0]).join('').slice(0,2).toUpperCase();
         const tClass = e.total!==null?totalTierClass(isToday?e.total:e.avg??0,1000):'';
         let breakdownContent = '';
@@ -427,7 +427,7 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
         let scoreHtml: string;
         if (e.played) {
           if (isToday) scoreHtml=`<div class="score-col"><div class="score-main ${tClass}">${e.total}</div><div class="score-sub">/ 1,000</div></div>`;
-          else scoreHtml=`<div class="score-col"><div class="score-main ${tClass}">${(e.total??0).toLocaleString()}</div><div class="score-sub">${e.count} day${e.count!==1?'s':''} Â· avg ${e.avg}</div></div>`;
+          else scoreHtml=`<div class="score-col"><div class="score-main ${tClass}">${(e.total??0).toLocaleString()}</div><div class="score-sub">${e.count} day${e.count!==1?'s':''} ÃÂ· avg ${e.avg}</div></div>`;
         } else {
           scoreHtml=`<div class="score-col no-played">Not played</div>`;
         }
@@ -438,7 +438,7 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
             <div class="avatar">${initials}</div>
             <div class="info"><div class="name">${e.username}</div>${!isToday&&e.played?`<div class="sub">Best: ${e.best}</div>`:''}</div>
             ${scoreHtml}
-            ${hasBreak?'<div class="chevron">â¾</div>':''}
+            ${hasBreak?'<div class="chevron">Ã¢ÂÂ¾</div>':''}
           </div>
           ${hasBreak?`<div class="breakdown${isExpanded?' open':''}">${breakdownContent}</div>`:''}
         </div>`;
@@ -463,10 +463,10 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
     const bestAvg = (qualAvg.length?qualAvg:users).reduce((b,u)=>(!b||u.avg>b.avg)?u:b, null as typeof users[0]|null);
     const bestStrk = users.reduce((b,u)=>(!b||u.bestStreak>b.bestStreak)?u:b, null as typeof users[0]|null);
     const records = [
-      {emoji:'ð',val:mostWon?.daysWon??0,name:mostWon?.username??'â',lbl:'Most Days Won'},
-      {emoji:'ð¯',val:bestScr?.bestScore??0,name:bestScr?.username??'â',lbl:'Best Score'},
-      {emoji:'ð',val:bestAvg?.avg??0,name:bestAvg?.username??'â',lbl:'Best Average'},
-      {emoji:'ð¥',val:bestStrk?.bestStreak??0,name:bestStrk?.username??'â',lbl:'Longest Streak'},
+      {emoji:'Ã°ÂÂÂ',val:mostWon?.daysWon??0,name:mostWon?.username??'Ã¢ÂÂ',lbl:'Most Days Won'},
+      {emoji:'Ã°ÂÂÂ¯',val:bestScr?.bestScore??0,name:bestScr?.username??'Ã¢ÂÂ',lbl:'Best Score'},
+      {emoji:'Ã°ÂÂÂ',val:bestAvg?.avg??0,name:bestAvg?.username??'Ã¢ÂÂ',lbl:'Best Average'},
+      {emoji:'Ã°ÂÂÂ¥',val:bestStrk?.bestStreak??0,name:bestStrk?.username??'Ã¢ÂÂ',lbl:'Longest Streak'},
     ];
     const recordsHtml = records.map(r=>`<div class="record-card"><div class="record-emoji">${r.emoji}</div><div class="record-val">${r.val}</div><div class="record-name">${r.name}</div><div class="record-lbl">${r.lbl}</div></div>`).join('');
     const sorted = [...users].sort((a,b)=>b.daysWon-a.daysWon||b.avg-a.avg);
@@ -474,7 +474,7 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
     sorted.forEach(u => {
       const initials = u.username.split(/\s+/).map((w:string)=>w[0]).join('').slice(0,2).toUpperCase();
       const h2hEntries = Object.entries(u.h2h).filter(([,r])=>r.w+r.l+r.t>0);
-      const h2hHtml = h2hEntries.length?`<div class="h2h-section-title">Head-to-Head</div>${h2hEntries.sort((a,b)=>b[1].w-a[1].w).map(([opp,r])=>`<div class="h2h-row"><div class="h2h-name">${opp}</div><div class="h2h-record"><span class="h2h-w">${r.w}W</span><span class="h2h-t" style="margin:0 3px">Â·</span><span class="h2h-l">${r.l}L</span>${r.t>0?`<span class="h2h-t" style="margin:0 3px">Â·</span><span class="h2h-t">${r.t}T</span>`:''}</div></div>`).join('')}`:'';
+      const h2hHtml = h2hEntries.length?`<div class="h2h-section-title">Head-to-Head</div>${h2hEntries.sort((a,b)=>b[1].w-a[1].w).map(([opp,r])=>`<div class="h2h-row"><div class="h2h-name">${opp}</div><div class="h2h-record"><span class="h2h-w">${r.w}W</span><span class="h2h-t" style="margin:0 3px">ÃÂ·</span><span class="h2h-l">${r.l}L</span>${r.t>0?`<span class="h2h-t" style="margin:0 3px">ÃÂ·</span><span class="h2h-t">${r.t}T</span>`:''}</div></div>`).join('')}`:'';
       const key = `stats-${u.username}`;
       const isExpanded = openEntry===key;
       const panelHtml = `<div class="breakdown-inner"><div class="stats-grid">
@@ -482,7 +482,7 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
         <div class="sg-item"><div class="sg-val">${u.daysPlayed}</div><div class="sg-lbl">Played</div></div>
         <div class="sg-item"><div class="sg-val">${u.avg}</div><div class="sg-lbl">Avg Score</div></div>
         <div class="sg-item"><div class="sg-val">${u.bestScore}</div><div class="sg-lbl">Best Score</div></div>
-        <div class="sg-item"><div class="sg-val">ð¥ ${u.currentStreak}</div><div class="sg-lbl">Cur Streak</div></div>
+        <div class="sg-item"><div class="sg-val">Ã°ÂÂÂ¥ ${u.currentStreak}</div><div class="sg-lbl">Cur Streak</div></div>
         <div class="sg-item"><div class="sg-val">${u.bestStreak}</div><div class="sg-lbl">Best Streak</div></div>
         <div class="sg-item"><div class="sg-val">${u.weeksWon}</div><div class="sg-lbl">Weeks Won</div></div>
         <div class="sg-item"><div class="sg-val">${u.monthsWon}</div><div class="sg-lbl">Months Won</div></div>
@@ -491,9 +491,9 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
       html += `<div class="entry-wrap" data-username="${key}">
         <div class="entry expandable${isExpanded?' expanded':''}" onclick="toggleBreakdown('${uKey}')">
           <div class="avatar">${initials}</div>
-          <div class="info"><div class="name">${u.username}</div><div class="sub">${u.daysWon} day${u.daysWon!==1?'s':''} won Â· ${u.daysPlayed} played</div></div>
+          <div class="info"><div class="name">${u.username}</div><div class="sub">${u.daysWon} day${u.daysWon!==1?'s':''} won ÃÂ· ${u.daysPlayed} played</div></div>
           <div class="score-col"><div class="score-main">${u.avg}</div><div class="score-sub">avg</div></div>
-          <div class="chevron">â¾</div>
+          <div class="chevron">Ã¢ÂÂ¾</div>
         </div>
         <div class="breakdown${isExpanded?' open':''}">${panelHtml}</div>
       </div>`;
@@ -506,14 +506,14 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
     const el = document.getElementById('footer');
     if (!el) return;
     if (initialData) {
-      el.innerHTML = `<span style="color:#3b82f6;font-weight:600;">Demo Mode</span> Â· <a href="/" style="color:var(--muted);text-decoration:none;">Set up your group â</a>`;
+      el.innerHTML = `<span style="color:#3b82f6;font-weight:600;">Demo Mode</span> ÃÂ· <a href="/" style="color:var(--muted);text-decoration:none;">Set up your group Ã¢ÂÂ</a>`;
     } else {
       const t = lastFetched?.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}) || '';
-      el.innerHTML = `Updated ${t} Â· <button class="sync-btn" onclick="refreshNow()">â» Refresh</button>`;
+      el.innerHTML = `Updated ${t} ÃÂ· <button class="sync-btn" onclick="refreshNow()">Ã¢ÂÂ» Refresh</button>`;
     }
   }
 
-  // ââ Map review ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+  // Ã¢ÂÂÃ¢ÂÂ Map review Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
 
   let maplibreLoaded = false;
   let mapInstance: any = null;
@@ -523,10 +523,10 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
     return new Promise((resolve) => {
       const link = document.createElement('link');
       link.rel = 'stylesheet';
-      link.href = 'https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css';
+      link.href = 'https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.css';
       document.head.appendChild(link);
       const script = document.createElement('script');
-      script.src = 'https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js';
+      script.src = 'https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.js';
       script.onload = () => { maplibreLoaded = true; resolve(); };
       document.head.appendChild(script);
     });
@@ -542,13 +542,13 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
       <div class="map-info-inner">
         <div class="map-info-qnum" style="color:${color}">Q${index + 1}</div>
         <div class="map-info-prompt">${prompt || ''}</div>
-        <div class="map-info-answer">ð ${guess.answer.name}</div>
+        <div class="map-info-answer">Ã°ÂÂÂ ${guess.answer.name}</div>
         ${guess.answer.story ? `<div class="map-info-story">${guess.answer.story}</div>` : ''}
       </div>`;
   }
 
   (window as any).openMapReview = async function(date: string) {
-    if (initialData) return; // demo mode â no real results
+    if (initialData) return; // demo mode Ã¢ÂÂ no real results
     const modal = document.getElementById('mapModal');
     const title = document.getElementById('mapModalTitle');
     const container = document.getElementById('mapContainer');
@@ -556,7 +556,7 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
     if (!modal || !container || !panel) return;
 
     if (title) title.textContent = `${formatDisplayDate(date)} answers`;
-    panel.innerHTML = '<div class="map-info-loading">Loadingâ¦</div>';
+    panel.innerHTML = '<div class="map-info-loading">LoadingÃ¢ÂÂ¦</div>';
     modal.style.display = 'flex';
     document.body.style.overflow = 'hidden';
 
@@ -646,12 +646,12 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
     if (mapInstance) { mapInstance.remove(); mapInstance = null; }
   };
 
-  // ââ Boot ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+  // Ã¢ÂÂÃ¢ÂÂ Boot Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
 
   Promise.all([loadScores(), loadQuestions()]);
 }
 
-// âââ CSS ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+// Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂ CSS Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
 
 const CSS = `
   :root {
@@ -744,14 +744,14 @@ const CSS = `
   .loading,.empty { text-align:center; padding:48px 20px; color:var(--muted); font-size:14px; }
   .error-box { background:rgba(239,68,68,0.08); border:1px solid rgba(239,68,68,0.2); border-radius:10px; padding:16px; margin:16px 0; font-size:13px; color:#fca5a5; }
 
-  /* ââ Period label row ââ */
+  /* Ã¢ÂÂÃ¢ÂÂ Period label row Ã¢ÂÂÃ¢ÂÂ */
   .period-label-row { display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; }
   .map-review-btn { background:rgba(59,130,246,0.12); border:1px solid rgba(59,130,246,0.3); border-radius:6px; color:#3b82f6; font-size:11px; font-weight:600; padding:4px 10px; cursor:pointer; transition:background 0.15s; }
   .map-review-btn:hover { background:rgba(59,130,246,0.22); }
   .day-map-icon { background:none; border:none; font-size:13px; cursor:pointer; opacity:0.5; padding:0 0 0 6px; transition:opacity 0.15s; line-height:1; }
   .day-map-icon:hover { opacity:1; }
 
-  /* ââ Map modal ââ */
+  /* Ã¢ÂÂÃ¢ÂÂ Map modal Ã¢ÂÂÃ¢ÂÂ */
   .map-modal { position:fixed; inset:0; z-index:1000; background:var(--bg); display:flex; flex-direction:column; }
   .map-modal-bar { display:flex; align-items:center; justify-content:space-between; padding:14px 16px 12px; background:var(--surface); border-bottom:1px solid var(--border); flex-shrink:0; }
   .map-modal-title { font-size:15px; font-weight:700; }
