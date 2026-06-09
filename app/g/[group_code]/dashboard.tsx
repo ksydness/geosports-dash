@@ -538,14 +538,12 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
     const panel = document.getElementById('mapInfoPanel');
     if (!panel) return;
     const color = PIN_COLORS[index];
-    const tc = tierClass(guess.rawScore);
     panel.innerHTML = `
       <div class="map-info-inner">
         <div class="map-info-qnum" style="color:${color}">Q${index + 1}</div>
         <div class="map-info-prompt">${prompt || ''}</div>
         <div class="map-info-answer">📍 ${guess.answer.name}</div>
         ${guess.answer.story ? `<div class="map-info-story">${guess.answer.story}</div>` : ''}
-        <div class="map-info-score"><span class="${tc}">${guess.score}</span> pts · ${Math.round(guess.distanceMiles).toLocaleString()} mi away</div>
       </div>`;
   }
 
