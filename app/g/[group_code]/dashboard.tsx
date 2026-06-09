@@ -593,6 +593,7 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
       style: {
         version: 8,
         projection: { type: 'globe' },
+        glyphs: 'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf',
         sources: {
           'esri-satellite': {
             type: 'raster',
@@ -607,6 +608,7 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
           },
         },
         layers: [
+          { id: 'background', type: 'background', paint: { 'background-color': '#000010' } },
           { id: 'satellite', type: 'raster', source: 'esri-satellite' },
           { id: 'borders', type: 'raster', source: 'esri-borders' },
         ],
@@ -617,7 +619,6 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
       maxZoom: 10,
     });
     mapInstance = map;
-    map.setProjection('globe');
 
     const prompts = questionsCache[date] || [];
 
