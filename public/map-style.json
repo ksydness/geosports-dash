@@ -1,0 +1,89 @@
+{
+  "version": 8,
+  "name": "geosports-satellite-globe",
+  "sources": {
+    "satellite": {
+      "type": "raster",
+      "tiles": [
+        "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+      ],
+      "tileSize": 256,
+      "maxzoom": 19,
+      "attribution": "Tiles © Esri — Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community"
+    },
+    "openmaptiles": {
+      "type": "vector",
+      "url": "https://tiles.openfreemap.org/planet"
+    },
+    "us-states": {
+      "type": "geojson",
+      "data": "/us-states.geojson",
+      "generateId": true
+    }
+  },
+  "glyphs": "https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf",
+  "sky": {},
+  "layers": [
+    {
+      "id": "satellite",
+      "type": "raster",
+      "source": "satellite"
+    },
+    {
+      "id": "boundary-state-us",
+      "type": "line",
+      "source": "us-states",
+      "minzoom": 2,
+      "layout": { "line-cap": "round", "line-join": "round" },
+      "paint": {
+        "line-color": "rgba(255,255,255,0.55)",
+        "line-width": ["interpolate", ["linear"], ["zoom"], 2, 0.4, 5, 0.8, 8, 1.2],
+        "line-dasharray": [2, 2]
+      }
+    },
+    {
+      "id": "boundary-country",
+      "type": "line",
+      "source": "openmaptiles",
+      "source-layer": "boundary",
+      "filter": ["all", ["==", ["get", "admin_level"], 2], ["!=", ["get", "maritime"], 1]],
+      "layout": { "line-cap": "round", "line-join": "round" },
+      "paint": {
+        "line-color": "rgba(255,255,255,0.9)",
+        "line-width": ["interpolate", ["linear"], ["zoom"], 0, 0.6, 4, 1.0, 8, 1.6]
+      }
+    },
+    {
+      "id": "boundary-country-disputed",
+      "type": "line",
+      "source": "openmaptiles",
+      "source-layer": "boundary",
+      "filter": ["all", ["==", ["get", "admin_level"], 2], ["==", ["get", "disputed"], 1], ["!=", ["get", "maritime"], 1]],
+      "paint": {
+        "line-color": "rgba(255,255,255,0.6)",
+        "line-width": 1,
+        "line-dasharray": [3, 3]
+      }
+    },
+    {
+      "id": "label-country",
+      "type": "symbol",
+      "source": "openmaptiles",
+      "source-layer": "place",
+      "filter": ["==", ["get", "class"], "country"],
+      "layout": {
+        "text-field": ["coalesce", ["get", "iso_a2"], ["get", "name:en"], ["get", "name"]],
+        "text-font": ["Noto Sans Bold"],
+        "text-size": ["interpolate", ["linear"], ["zoom"], 1, 11, 4, 15, 6, 20],
+        "text-letter-spacing": 0.08,
+        "text-max-width": 4,
+        "symbol-sort-key": ["get", "rank"]
+      },
+      "paint": {
+        "text-color": "#ffffff",
+        "text-halo-color": "rgba(0,0,0,0.75)",
+        "text-halo-width": 1.6
+      }
+    }
+  ]
+}

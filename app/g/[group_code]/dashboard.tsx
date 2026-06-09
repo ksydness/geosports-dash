@@ -590,33 +590,12 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
 
     const map = new maplibregl.Map({
       container,
-      style: {
-        version: 8,
-        projection: { type: 'globe' },
-        glyphs: 'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf',
-        sources: {
-          'esri-satellite': {
-            type: 'raster',
-            tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
-            tileSize: 256,
-            attribution: 'Tiles © Esri',
-          },
-          'esri-borders': {
-            type: 'raster',
-            tiles: ['https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}'],
-            tileSize: 256,
-          },
-        },
-        layers: [
-          { id: 'background', type: 'background', paint: { 'background-color': '#000010' } },
-          { id: 'satellite', type: 'raster', source: 'esri-satellite' },
-          { id: 'borders', type: 'raster', source: 'esri-borders' },
-        ],
-      },
+      style: '/map-style.json',
       center: [0, 20],
       zoom: 0.5,
       minZoom: 0,
       maxZoom: 10,
+      projection: { type: 'globe' },
     });
     mapInstance = map;
 
