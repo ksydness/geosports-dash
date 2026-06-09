@@ -602,15 +602,8 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
     const prompts = questionsCache[date] || [];
 
     map.on('load', () => {
-      map.setProjection('globe');
-      map.setFog({
-        'space-color': '#000000',
-        'star-intensity': 0.0,
-        'color': 'rgba(255, 255, 255, 0.08)',
-        'high-color': 'rgba(200, 220, 255, 0.2)',
-        'horizon-blend': 0.05,
-      });
-      const bounds: [[number,number],[number,number]] = [[180,90],[-180,-90]];
+      map.setProjection({type: 'globe'});
+            const bounds: [[number,number],[number,number]] = [[180,90],[-180,-90]];
 
       guesses.forEach((g: any, i: number) => {
         const color = PIN_COLORS[i];
