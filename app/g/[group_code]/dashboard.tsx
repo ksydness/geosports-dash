@@ -611,8 +611,8 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
         ],
       },
       center: [0, 20],
-      zoom: 1.5,
-      minZoom: 1,
+      zoom: 0.5,
+      minZoom: 0,
       maxZoom: 10,
       projection: { type: 'globe' },
     });
