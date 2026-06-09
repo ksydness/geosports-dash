@@ -592,6 +592,7 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
       container,
       style: {
         version: 8,
+        projection: { type: 'globe' },
         sources: {
           'esri-satellite': {
             type: 'raster',
@@ -614,9 +615,9 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
       zoom: 0.5,
       minZoom: 0,
       maxZoom: 10,
-      projection: { type: 'globe' },
     });
     mapInstance = map;
+    map.setProjection('globe');
 
     const prompts = questionsCache[date] || [];
 
