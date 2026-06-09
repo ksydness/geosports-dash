@@ -555,37 +555,22 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
     modal.style.display = 'flex';
     document.body.style.overflow = 'hidden';
 
-    let guesses: any[];
-    if (initialData) {
-      // Demo mode — generate seeded random answer locations using the real question count
-      const nQuestions = (questionsCache[date] || Array(5)).length || 5;
-      let s = date.split('-').reduce((acc: number, n: string) => acc * 31 + parseInt(n), 7);
-      const rng = () => { s = (s * 1664525 + 1013904223) & 0xffffffff; return (s >>> 0) / 0xffffffff; };
-      guesses = Array.from({ length: nQuestions }, () => ({
-        answer: {
-          lat: (rng() * 140) - 70,
-          lng: (rng() * 340) - 170,
-          name: 'Demo location',
-          story: '',
-        },
-      }));
-    } else {
-      // Fetch results from API
-      let data: any;
-      try {
-        const res = await fetch(`/api/results/${groupCode}?date=${date}`);
-        if (res.status === 404) {
-          panel.innerHTML = '<div class="map-info-loading">No results found for this date.<br><small>The account owner may not have played that day.</small></div>';
-          return;
-        }
-        if (!res.ok) throw new Error('fetch failed');
-        data = await res.json();
-      } catch {
-        panel.innerHTML = '<div class="map-info-loading">Could not load results.</div>';
+    // Fetch results — demo uses a known registered group to get real answer locations
+    const fetchCode = initialData ? 'TXA6HQ' : groupCode;
+    let data: any;
+    try {
+      const res = await fetch(`/api/results/${fetchCode}?date=${date}`);
+      if (res.status === 404) {
+        panel.innerHTML = '<div class="map-info-loading">No results found for this date.<br><small>The account owner may not have played that day.</small></div>';
         return;
       }
-      guesses = data.guesses || [];
+      if (!res.ok) throw new Error('fetch failed');
+      data = await res.json();
+    } catch {
+      panel.innerHTML = '<div class="map-info-loading">Could not load results.</div>';
+      return;
     }
+    const guesses: any[] = data.guesses || [];
     if (!guesses.length) {
       panel.innerHTML = '<div class="map-info-loading">No answer data for this date.</div>';
       return;
