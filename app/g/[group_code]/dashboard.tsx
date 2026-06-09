@@ -592,8 +592,8 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
       container,
       style: '/map-style.json',
       center: [0, 20],
-      zoom: 0.5,
-      minZoom: 0,
+      zoom: 1,
+      minZoom: -1,
       maxZoom: 10,
       projection: { type: 'globe' },
     });
