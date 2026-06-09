@@ -33,11 +33,20 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: message }, { status: 401 });
   }
 
+  // Log raw response so we can discover the actual field names
+  console.log('[register] GeoSports groupData keys:', Object.keys(groupData as object));
+  console.log('[register] GeoSports groupData:', JSON.stringify(groupData));
+
   // Extract group name — try several possible field names
+  const raw = groupData as Record<string, unknown>;
   const groupName =
-    groupData.name ||
-    groupData.groupName ||
-    groupData.group_name ||
+    (raw.name as string) ||
+    (raw.groupName as string) ||
+    (raw.group_name as string) ||
+    (raw.title as string) ||
+    (raw.groupTitle as string) ||
+    (raw.group_title as string) ||
+    (raw.label as string) ||
     code;
 
   const encryptedToken = encrypt(token);

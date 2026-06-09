@@ -60,7 +60,7 @@ export default function Home() {
             <input
               style={styles.input}
               type="text"
-              placeholder="e.g. TXA6HQ"
+              placeholder="e.g. GRP7KX"
               value={groupCode}
               onChange={e => setGroupCode(e.target.value.toUpperCase())}
               maxLength={10}
