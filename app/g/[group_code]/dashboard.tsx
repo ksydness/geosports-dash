@@ -515,19 +515,19 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
 
   // ── Map review ────────────────────────────────────────────────────────────────
 
-  let leafletLoaded = false;
+  let maplibreLoaded = false;
   let mapInstance: any = null;
 
-  async function loadLeaflet(): Promise<void> {
-    if (leafletLoaded) return;
+  async function loadMapLibre(): Promise<void> {
+    if (maplibreLoaded) return;
     return new Promise((resolve) => {
       const link = document.createElement('link');
       link.rel = 'stylesheet';
-      link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+      link.href = 'https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css';
       document.head.appendChild(link);
       const script = document.createElement('script');
-      script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
-      script.onload = () => { leafletLoaded = true; resolve(); };
+      script.src = 'https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js';
+      script.onload = () => { maplibreLoaded = true; resolve(); };
       document.head.appendChild(script);
     });
   }
@@ -581,56 +581,73 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
       return;
     }
 
-    await loadLeaflet();
-    const L = (window as any).L;
+    await loadMapLibre();
+    const maplibregl = (window as any).maplibregl;
 
     // Destroy previous map if any
     if (mapInstance) { mapInstance.remove(); mapInstance = null; }
     container.innerHTML = '';
 
-    const map = L.map(container, {
-      center: [20, 0],
-      zoom: 2,
+    const map = new maplibregl.Map({
+      container,
+      style: {
+        version: 8,
+        sources: {
+          'esri-satellite': {
+            type: 'raster',
+            tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
+            tileSize: 256,
+            attribution: 'Tiles © Esri',
+          },
+          'esri-borders': {
+            type: 'raster',
+            tiles: ['https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}'],
+            tileSize: 256,
+          },
+        },
+        layers: [
+          { id: 'satellite', type: 'raster', source: 'esri-satellite' },
+          { id: 'borders', type: 'raster', source: 'esri-borders' },
+        ],
+      },
+      center: [0, 20],
+      zoom: 1.5,
       minZoom: 1,
       maxZoom: 10,
-      zoomControl: true,
+      projection: { type: 'globe' },
     });
     mapInstance = map;
 
-    // Esri satellite base layer (matches GeoSports)
-    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-      attribution: 'Tiles © Esri',
-      maxZoom: 19,
-    }).addTo(map);
-    // Country/state border overlay (matches GeoSports)
-    L.tileLayer('https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', {
-      attribution: '',
-      maxZoom: 19,
-      opacity: 0.8,
-    }).addTo(map);
-
     const prompts = questionsCache[date] || [];
-    const bounds: [number, number][] = [];
 
-    guesses.forEach((g: any, i: number) => {
-      const color = PIN_COLORS[i];
-      const icon = L.divIcon({
-        className: '',
-        html: `<div style="width:28px;height:28px;border-radius:50%;background:${color};border:2px solid #fff;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:#fff;box-shadow:0 2px 6px rgba(0,0,0,0.5);cursor:pointer">${i + 1}</div>`,
-        iconSize: [28, 28],
-        iconAnchor: [14, 14],
+    map.on('load', () => {
+      const bounds: [[number,number],[number,number]] = [[180,90],[-180,-90]];
+
+      guesses.forEach((g: any, i: number) => {
+        const color = PIN_COLORS[i];
+        const el = document.createElement('div');
+        el.style.cssText = `width:28px;height:28px;border-radius:50%;background:${color};border:2px solid #fff;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:#fff;box-shadow:0 2px 6px rgba(0,0,0,0.5);cursor:pointer`;
+        el.textContent = String(i + 1);
+        el.addEventListener('click', () => showMapInfoPanel(g, prompts[i] || '', i));
+
+        new maplibregl.Marker({ element: el })
+          .setLngLat([g.answer.lng, g.answer.lat])
+          .addTo(map);
+
+        if (g.answer.lng < bounds[0][0]) bounds[0][0] = g.answer.lng;
+        if (g.answer.lat < bounds[0][1]) bounds[0][1] = g.answer.lat;
+        if (g.answer.lng > bounds[1][0]) bounds[1][0] = g.answer.lng;
+        if (g.answer.lat > bounds[1][1]) bounds[1][1] = g.answer.lat;
       });
 
-      const marker = L.marker([g.answer.lat, g.answer.lng], { icon }).addTo(map);
-      bounds.push([g.answer.lat, g.answer.lng]);
+      if (guesses.length === 1) {
+        map.flyTo({ center: [guesses[0].answer.lng, guesses[0].answer.lat], zoom: 4 });
+      } else {
+        map.fitBounds(bounds, { padding: 60, maxZoom: 5, duration: 1200 });
+      }
 
-      marker.on('click', () => showMapInfoPanel(g, prompts[i] || '', i));
+      showMapInfoPanel(guesses[0], prompts[0] || '', 0);
     });
-
-    if (bounds.length) map.fitBounds(bounds, { padding: [40, 40], maxZoom: 5 });
-
-    // Show first question by default
-    showMapInfoPanel(guesses[0], prompts[0] || '', 0);
   };
 
   (window as any).closeMapReview = function() {
@@ -763,9 +780,8 @@ const CSS = `
   .map-info-score span { font-weight:700; }
 
   /* Leaflet overrides for dark theme */
-  .leaflet-container { background:#1a2535; }
-  .leaflet-control-attribution { background:rgba(0,0,0,0.5) !important; color:#6b7a99 !important; font-size:9px !important; }
-  .leaflet-control-attribution a { color:#3b82f6 !important; }
-  .leaflet-bar a { background:var(--surface) !important; border-color:var(--border) !important; color:var(--text) !important; }
-  .leaflet-bar a:hover { background:var(--surface2) !important; }
+  .maplibregl-map { background:#000 !important; }
+  .maplibregl-ctrl-attrib { background:rgba(0,0,0,0.5) !important; color:#6b7a99 !important; font-size:9px !important; }
+  .maplibregl-ctrl-attrib a { color:#3b82f6 !important; }
+  .maplibregl-ctrl-zoom-in, .maplibregl-ctrl-zoom-out, .maplibregl-ctrl-compass { background:var(--surface) !important; border-color:var(--border) !important; color:var(--text) !important; }
 `;
