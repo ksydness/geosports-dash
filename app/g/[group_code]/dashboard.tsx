@@ -9,16 +9,10 @@ interface ScoreEntry {
   rawScores?: number[];
 }
 
-interface DemoGuess {
-  answer: { lat: number; lng: number; name: string; story: string };
-}
-
 interface InitialData {
   group_name: string;
   scores: ScoreEntry[];
   active: boolean;
-  demoGuesses?: DemoGuess[];
-  demoQuestions?: string[];
 }
 
 interface Props {
@@ -563,9 +557,18 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
 
     let guesses: any[];
     if (initialData) {
-      // Demo mode — use static demo guesses and questions
-      guesses = initialData.demoGuesses || [];
-      questionsCache[date] = initialData.demoQuestions || [];
+      // Demo mode — generate seeded random answer locations using the real question count
+      const nQuestions = (questionsCache[date] || Array(5)).length || 5;
+      let s = date.split('-').reduce((acc: number, n: string) => acc * 31 + parseInt(n), 7);
+      const rng = () => { s = (s * 1664525 + 1013904223) & 0xffffffff; return (s >>> 0) / 0xffffffff; };
+      guesses = Array.from({ length: nQuestions }, () => ({
+        answer: {
+          lat: (rng() * 140) - 70,
+          lng: (rng() * 340) - 170,
+          name: 'Demo location',
+          story: '',
+        },
+      }));
     } else {
       // Fetch results from API
       let data: any;
