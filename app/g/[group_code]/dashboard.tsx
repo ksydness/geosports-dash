@@ -9,10 +9,16 @@ interface ScoreEntry {
   rawScores?: number[];
 }
 
+interface DemoGuess {
+  answer: { lat: number; lng: number; name: string; story: string };
+}
+
 interface InitialData {
   group_name: string;
   scores: ScoreEntry[];
   active: boolean;
+  demoGuesses?: DemoGuess[];
+  demoQuestions?: string[];
 }
 
 interface Props {
@@ -249,9 +255,7 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
     const rows = [...days].reverse().map(d => {
       const tc = totalTierClass(d.score, 1000);
       const dots = (d.rawScores || []).map(r => `<div class="mini-dot ${dotClass(r)}"></div>`).join('');
-      const mapIcon = !initialData
-        ? `<button class="day-map-icon" onclick="event.stopPropagation();openMapReview('${d.date}')" title="View on map">📍</button>`
-        : '';
+      const mapIcon = `<button class="day-map-icon" onclick="event.stopPropagation();openMapReview('${d.date}')" title="View on map">📍</button>`;
       return `<div class="day-row">
         <div class="day-date-lbl">${formatDisplayDate(d.date)}</div>
         <div class="day-score-num ${tc}">${d.score}</div>
@@ -394,9 +398,7 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
     const played = entries.filter(e=>e.played);
     const totalDays = isToday?null:[...new Set(filtered.map(s=>s.date))].length;
     const avgScore = played.length?Math.round(played.reduce((s,e)=>s+(e.avg??0),0)/played.length):null;
-    const mapBtn = !initialData
-      ? `<button class="map-review-btn" onclick="openMapReview('${start}')">🗺 Map</button>`
-      : '';
+    const mapBtn = `<button class="map-review-btn" onclick="openMapReview('${start}')">🗺 Map</button>`;
     let html = `<div class="period-label-row"><span class="period-label">${label}</span>${isToday ? mapBtn : ''}</div>`;
     if (!isToday && played.length>0) {
       html += `<div class="stats-strip">
@@ -548,7 +550,6 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
   }
 
   (window as any).openMapReview = async function(date: string) {
-    if (initialData) return; // demo mode — no real results
     const modal = document.getElementById('mapModal');
     const title = document.getElementById('mapModalTitle');
     const container = document.getElementById('mapContainer');
@@ -560,22 +561,28 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
     modal.style.display = 'flex';
     document.body.style.overflow = 'hidden';
 
-    // Fetch results
-    let data: any;
-    try {
-      const res = await fetch(`/api/results/${groupCode}?date=${date}`);
-      if (res.status === 404) {
-        panel.innerHTML = '<div class="map-info-loading">No results found for this date.<br><small>The account owner may not have played that day.</small></div>';
+    let guesses: any[];
+    if (initialData) {
+      // Demo mode — use static demo guesses and questions
+      guesses = initialData.demoGuesses || [];
+      questionsCache[date] = initialData.demoQuestions || [];
+    } else {
+      // Fetch results from API
+      let data: any;
+      try {
+        const res = await fetch(`/api/results/${groupCode}?date=${date}`);
+        if (res.status === 404) {
+          panel.innerHTML = '<div class="map-info-loading">No results found for this date.<br><small>The account owner may not have played that day.</small></div>';
+          return;
+        }
+        if (!res.ok) throw new Error('fetch failed');
+        data = await res.json();
+      } catch {
+        panel.innerHTML = '<div class="map-info-loading">Could not load results.</div>';
         return;
       }
-      if (!res.ok) throw new Error('fetch failed');
-      data = await res.json();
-    } catch {
-      panel.innerHTML = '<div class="map-info-loading">Could not load results.</div>';
-      return;
+      guesses = data.guesses || [];
     }
-
-    const guesses: any[] = data.guesses || [];
     if (!guesses.length) {
       panel.innerHTML = '<div class="map-info-loading">No answer data for this date.</div>';
       return;

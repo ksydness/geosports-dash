@@ -72,3 +72,24 @@ export function generateDemoData(): DemoScore[] {
 }
 
 export const DEMO_GROUP_NAME = 'The Globetrotters';
+
+// Demo map data — 5 fake geo questions with answer locations
+export interface DemoGuess {
+  answer: { lat: number; lng: number; name: string; story: string };
+}
+
+export const DEMO_QUESTIONS = [
+  'Where is the Eiffel Tower located?',
+  'Where is the Great Wall of China?',
+  'Where is the Amazon River mouth?',
+  'Where is Machu Picchu?',
+  'Where is Mount Kilimanjaro?',
+];
+
+export const DEMO_GUESSES: DemoGuess[] = [
+  { answer: { lat: 48.8584, lng: 2.2945, name: 'Paris, France', story: 'The Eiffel Tower was built in 1889 as the entrance arch for the 1889 World\'s Fair.' } },
+  { answer: { lat: 40.4319, lng: 116.5704, name: 'Mutianyu, China', story: 'The Great Wall stretches over 13,000 miles and was built over many centuries to protect Chinese states.' } },
+  { answer: { lat: -0.1667, lng: -50.0, name: 'Marajó Island, Brazil', story: 'The Amazon River discharges about 20% of all fresh water that flows into the world\'s oceans.' } },
+  { answer: { lat: -13.1631, lng: -72.545, name: 'Machu Picchu, Peru', story: 'Machu Picchu was built by the Inca emperor Pachacuti in 1450 and abandoned during the Spanish conquest.' } },
+  { answer: { lat: -3.0674, lng: 37.3556, name: 'Kilimanjaro, Tanzania', story: 'At 5,895 m, Kilimanjaro is Africa\'s highest peak and the world\'s tallest free-standing mountain.' } },
+];
