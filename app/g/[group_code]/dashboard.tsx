@@ -50,6 +50,16 @@ export default function Dashboard({ groupCode, initialData }: Props) {
           <div className="footer" id="footer"></div>
         </div>
       </div>
+
+      {/* Map review modal */}
+      <div id="mapModal" className="map-modal" style={{display:'none'}}>
+        <div className="map-modal-bar">
+          <span id="mapModalTitle" className="map-modal-title"></span>
+          <button className="map-modal-close" onClick={() => (window as any).closeMapReview()}>✕</button>
+        </div>
+        <div id="mapContainer" className="map-container"></div>
+        <div id="mapInfoPanel" className="map-info-panel"></div>
+      </div>
     </>
   );
 }
@@ -239,10 +249,14 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
     const rows = [...days].reverse().map(d => {
       const tc = totalTierClass(d.score, 1000);
       const dots = (d.rawScores || []).map(r => `<div class="mini-dot ${dotClass(r)}"></div>`).join('');
+      const mapIcon = !initialData
+        ? `<button class="day-map-icon" onclick="event.stopPropagation();openMapReview('${d.date}')" title="View on map">📍</button>`
+        : '';
       return `<div class="day-row">
         <div class="day-date-lbl">${formatDisplayDate(d.date)}</div>
         <div class="day-score-num ${tc}">${d.score}</div>
         ${dots ? `<div class="day-mini-dots">${dots}</div>` : ''}
+        ${mapIcon}
       </div>`;
     }).join('');
     return `<div class="breakdown-inner">${rows}</div>`;
@@ -380,7 +394,10 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
     const played = entries.filter(e=>e.played);
     const totalDays = isToday?null:[...new Set(filtered.map(s=>s.date))].length;
     const avgScore = played.length?Math.round(played.reduce((s,e)=>s+(e.avg??0),0)/played.length):null;
-    let html = `<div class="period-label">${label}</div>`;
+    const mapBtn = !initialData
+      ? `<button class="map-review-btn" onclick="openMapReview('${start}')">🗺 Map</button>`
+      : '';
+    let html = `<div class="period-label-row"><span class="period-label">${label}</span>${isToday ? mapBtn : ''}</div>`;
     if (!isToday && played.length>0) {
       html += `<div class="stats-strip">
         <div class="stat"><div class="stat-val">${totalDays}</div><div class="stat-lbl">Days</div></div>
@@ -496,6 +513,128 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
     }
   }
 
+  // ── Map review ────────────────────────────────────────────────────────────────
+
+  let leafletLoaded = false;
+  let mapInstance: any = null;
+
+  async function loadLeaflet(): Promise<void> {
+    if (leafletLoaded) return;
+    return new Promise((resolve) => {
+      const link = document.createElement('link');
+      link.rel = 'stylesheet';
+      link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+      document.head.appendChild(link);
+      const script = document.createElement('script');
+      script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+      script.onload = () => { leafletLoaded = true; resolve(); };
+      document.head.appendChild(script);
+    });
+  }
+
+  const PIN_COLORS = ['#3b82f6','#8b5cf6','#ec4899','#f59e0b','#10b981'];
+
+  function showMapInfoPanel(guess: any, prompt: string, index: number) {
+    const panel = document.getElementById('mapInfoPanel');
+    if (!panel) return;
+    const color = PIN_COLORS[index];
+    const tc = tierClass(guess.rawScore);
+    panel.innerHTML = `
+      <div class="map-info-inner">
+        <div class="map-info-qnum" style="color:${color}">Q${index + 1}</div>
+        <div class="map-info-prompt">${prompt || ''}</div>
+        <div class="map-info-answer">📍 ${guess.answer.name}</div>
+        ${guess.answer.story ? `<div class="map-info-story">${guess.answer.story}</div>` : ''}
+        <div class="map-info-score"><span class="${tc}">${guess.score}</span> pts · ${Math.round(guess.distanceMiles).toLocaleString()} mi away</div>
+      </div>`;
+  }
+
+  (window as any).openMapReview = async function(date: string) {
+    if (initialData) return; // demo mode — no real results
+    const modal = document.getElementById('mapModal');
+    const title = document.getElementById('mapModalTitle');
+    const container = document.getElementById('mapContainer');
+    const panel = document.getElementById('mapInfoPanel');
+    if (!modal || !container || !panel) return;
+
+    if (title) title.textContent = `${formatDisplayDate(date)} answers`;
+    panel.innerHTML = '<div class="map-info-loading">Loading…</div>';
+    modal.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+
+    // Fetch results
+    let data: any;
+    try {
+      const res = await fetch(`/api/results/${groupCode}?date=${date}`);
+      if (res.status === 404) {
+        panel.innerHTML = '<div class="map-info-loading">No results found for this date.<br><small>The account owner may not have played that day.</small></div>';
+        return;
+      }
+      if (!res.ok) throw new Error('fetch failed');
+      data = await res.json();
+    } catch {
+      panel.innerHTML = '<div class="map-info-loading">Could not load results.</div>';
+      return;
+    }
+
+    const guesses: any[] = data.guesses || [];
+    if (!guesses.length) {
+      panel.innerHTML = '<div class="map-info-loading">No answer data for this date.</div>';
+      return;
+    }
+
+    await loadLeaflet();
+    const L = (window as any).L;
+
+    // Destroy previous map if any
+    if (mapInstance) { mapInstance.remove(); mapInstance = null; }
+    container.innerHTML = '';
+
+    const map = L.map(container, {
+      center: [20, 0],
+      zoom: 2,
+      minZoom: 1,
+      maxZoom: 10,
+      zoomControl: true,
+    });
+    mapInstance = map;
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap contributors',
+      maxZoom: 19,
+    }).addTo(map);
+
+    const prompts = questionsCache[date] || [];
+    const bounds: [number, number][] = [];
+
+    guesses.forEach((g: any, i: number) => {
+      const color = PIN_COLORS[i];
+      const icon = L.divIcon({
+        className: '',
+        html: `<div style="width:28px;height:28px;border-radius:50%;background:${color};border:2px solid #fff;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:#fff;box-shadow:0 2px 6px rgba(0,0,0,0.5);cursor:pointer">${i + 1}</div>`,
+        iconSize: [28, 28],
+        iconAnchor: [14, 14],
+      });
+
+      const marker = L.marker([g.answer.lat, g.answer.lng], { icon }).addTo(map);
+      bounds.push([g.answer.lat, g.answer.lng]);
+
+      marker.on('click', () => showMapInfoPanel(g, prompts[i] || '', i));
+    });
+
+    if (bounds.length) map.fitBounds(bounds, { padding: [40, 40], maxZoom: 5 });
+
+    // Show first question by default
+    showMapInfoPanel(guesses[0], prompts[0] || '', 0);
+  };
+
+  (window as any).closeMapReview = function() {
+    const modal = document.getElementById('mapModal');
+    if (modal) modal.style.display = 'none';
+    document.body.style.overflow = '';
+    if (mapInstance) { mapInstance.remove(); mapInstance = null; }
+  };
+
   // ── Boot ──────────────────────────────────────────────────────────────────────
 
   Promise.all([loadScores(), loadQuestions()]);
@@ -593,4 +732,35 @@ const CSS = `
   .sync-btn:hover { border-color:var(--accent); color:var(--accent); }
   .loading,.empty { text-align:center; padding:48px 20px; color:var(--muted); font-size:14px; }
   .error-box { background:rgba(239,68,68,0.08); border:1px solid rgba(239,68,68,0.2); border-radius:10px; padding:16px; margin:16px 0; font-size:13px; color:#fca5a5; }
+
+  /* ── Period label row ── */
+  .period-label-row { display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; }
+  .map-review-btn { background:rgba(59,130,246,0.12); border:1px solid rgba(59,130,246,0.3); border-radius:6px; color:#3b82f6; font-size:11px; font-weight:600; padding:4px 10px; cursor:pointer; transition:background 0.15s; }
+  .map-review-btn:hover { background:rgba(59,130,246,0.22); }
+  .day-map-icon { background:none; border:none; font-size:13px; cursor:pointer; opacity:0.5; padding:0 0 0 6px; transition:opacity 0.15s; line-height:1; }
+  .day-map-icon:hover { opacity:1; }
+
+  /* ── Map modal ── */
+  .map-modal { position:fixed; inset:0; z-index:1000; background:var(--bg); display:flex; flex-direction:column; }
+  .map-modal-bar { display:flex; align-items:center; justify-content:space-between; padding:14px 16px 12px; background:var(--surface); border-bottom:1px solid var(--border); flex-shrink:0; }
+  .map-modal-title { font-size:15px; font-weight:700; }
+  .map-modal-close { background:none; border:none; color:var(--muted); font-size:20px; cursor:pointer; padding:0; line-height:1; transition:color 0.15s; }
+  .map-modal-close:hover { color:var(--text); }
+  .map-container { flex:1; min-height:0; }
+  .map-info-panel { flex-shrink:0; background:var(--surface); border-top:1px solid var(--border); max-height:38vh; overflow-y:auto; }
+  .map-info-inner { padding:14px 16px; }
+  .map-info-loading { padding:20px 16px; text-align:center; color:var(--muted); font-size:13px; }
+  .map-info-qnum { font-size:11px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; margin-bottom:4px; }
+  .map-info-prompt { font-size:13px; color:var(--muted); line-height:1.5; margin-bottom:8px; }
+  .map-info-answer { font-size:15px; font-weight:700; margin-bottom:6px; }
+  .map-info-story { font-size:12px; color:var(--muted); line-height:1.6; margin-bottom:8px; }
+  .map-info-score { font-size:12px; color:var(--muted); }
+  .map-info-score span { font-weight:700; }
+
+  /* Leaflet overrides for dark theme */
+  .leaflet-container { background:#1a2535; }
+  .leaflet-control-attribution { background:rgba(0,0,0,0.5) !important; color:#6b7a99 !important; font-size:9px !important; }
+  .leaflet-control-attribution a { color:#3b82f6 !important; }
+  .leaflet-bar a { background:var(--surface) !important; border-color:var(--border) !important; color:var(--text) !important; }
+  .leaflet-bar a:hover { background:var(--surface2) !important; }
 `;
