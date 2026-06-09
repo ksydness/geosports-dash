@@ -597,9 +597,16 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
     });
     mapInstance = map;
 
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '© OpenStreetMap contributors',
+    // Esri satellite base layer (matches GeoSports)
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+      attribution: 'Tiles © Esri',
       maxZoom: 19,
+    }).addTo(map);
+    // Country/state border overlay (matches GeoSports)
+    L.tileLayer('https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', {
+      attribution: '',
+      maxZoom: 19,
+      opacity: 0.8,
     }).addTo(map);
 
     const prompts = questionsCache[date] || [];
