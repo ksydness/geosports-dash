@@ -43,6 +43,11 @@ export async function backfillGroup(
   days = BACKFILL_DAYS
 ): Promise<number> {
   let written = 0;
+  // Claim the run up front — also powers the public endpoint's 24h throttle
+  await supabase
+    .from('groups')
+    .update({ last_backfilled_at: new Date().toISOString() })
+    .eq('group_code', groupCode);
   try {
     for (let i = 0; i < days; i++) {
       const date = etDateMinusDays(i);

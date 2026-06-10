@@ -49,7 +49,8 @@ CREATE TABLE groups (
   email TEXT,
   active BOOLEAN NOT NULL DEFAULT true,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  last_synced_at TIMESTAMPTZ
+  last_synced_at TIMESTAMPTZ,
+  last_backfilled_at TIMESTAMPTZ  -- throttles the public re-backfill endpoint
 );
 
 CREATE TABLE scores (
@@ -84,7 +85,7 @@ app/
     scores/[group_code]/route.ts  # GET: return scores + auto-sync if stale >10min
     questions/route.ts            # GET: proxy GeoSports public questions endpoint
     cron/sync/route.ts            # GET: daily cron — sync all active groups (full backfill for groups <48h old)
-    backfill/[group_code]/route.ts # POST: manual 30-day re-backfill (Bearer CRON_SECRET)
+    backfill/[group_code]/route.ts # GET/POST: re-run 30-day backfill (public, 24h throttle via groups.last_backfilled_at; CRON_SECRET bypasses)
 lib/
   supabase.ts   # Lazy-initialized Supabase client (Proxy pattern, avoids build errors)
   crypto.ts     # AES-256-GCM encrypt/decrypt for session tokens
