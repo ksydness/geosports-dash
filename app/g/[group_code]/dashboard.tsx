@@ -555,19 +555,19 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
     modal.style.display = 'flex';
     document.body.style.overflow = 'hidden';
 
-    // Fetch results — demo uses a known registered group to get real answer locations
-    const fetchCode = initialData ? 'TXA6HQ' : groupCode;
+    // Fetch the daily answer key from the public guess endpoint — available as soon
+    // as the round publishes, no played round required.
     let data: any;
     try {
-      const res = await fetch(`/api/results/${fetchCode}?date=${date}`);
+      const res = await fetch(`/api/answers?date=${date}`);
       if (res.status === 404) {
-        panel.innerHTML = '<div class="map-info-loading">No results found for this date.<br><small>The account owner may not have played that day.</small></div>';
+        panel.innerHTML = '<div class="map-info-loading">No answers available for this date yet.</div>';
         return;
       }
       if (!res.ok) throw new Error('fetch failed');
       data = await res.json();
     } catch {
-      panel.innerHTML = '<div class="map-info-loading">Could not load results.</div>';
+      panel.innerHTML = '<div class="map-info-loading">Could not load answers.</div>';
       return;
     }
     const guesses: any[] = data.guesses || [];
