@@ -83,7 +83,8 @@ app/
     register/route.ts             # POST: register a group, kick off 30-day backfill
     scores/[group_code]/route.ts  # GET: return scores + auto-sync if stale >10min
     questions/route.ts            # GET: proxy GeoSports public questions endpoint
-    cron/sync/route.ts            # GET: daily cron — sync all active groups
+    cron/sync/route.ts            # GET: daily cron — sync all active groups (full backfill for groups <48h old)
+    backfill/[group_code]/route.ts # POST: manual 30-day re-backfill (Bearer CRON_SECRET)
 lib/
   supabase.ts   # Lazy-initialized Supabase client (Proxy pattern, avoids build errors)
   crypto.ts     # AES-256-GCM encrypt/decrypt for session tokens
@@ -99,7 +100,8 @@ lib/
 - **Lazy Supabase client**: Proxy pattern avoids `supabaseUrl is required` errors at Next.js build time.
 - **Browser-like headers**: GeoSports API calls include `User-Agent`, `Referer`, `Origin` to avoid 401s.
 - **`.npmrc` with `legacy-peer-deps=true`**: Required for Vercel to resolve Next.js 15 / React 19 peer dep conflict.
-- **Cron**: Single daily cron at `0 6 * * *` registered in `vercel.json`.
+- **Cron**: Single daily cron at `0 6 * * *` registered in `vercel.json`. Groups registered <48h ago get a full 30-day backfill pass instead of a daily sync, to repair holes from the registration backfill.
+- **Backfill robustness**: `backfillGroup` (lib/sync.ts) retries each day once on transient GeoSports failure and paces requests at 400ms. Routes that run it need `export const maxDuration = 60` — Vercel's 10s default kills it mid-run (this caused sparse history for early groups).
 - **Eastern time**: The game rolls over at midnight ET, so all "today" date math (server and client) uses `America/New_York` via `lib/dates.ts`. Syncs cover today + yesterday (ET) to catch plays made after the previous day's last sync.
 - **Answer key cache**: `/api/answers` serves from the Supabase `answers` table when populated; otherwise fetches from GeoSports' guess endpoint and caches. Past dates are immutable (long `Cache-Control`).
 - **Escaping**: dashboard.tsx renders via innerHTML — all untrusted strings (usernames, prompts, answer names/stories) must go through `esc()`, and inline handler args through `attrJs()`.

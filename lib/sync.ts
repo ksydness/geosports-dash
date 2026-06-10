@@ -22,6 +22,57 @@ export async function upsertDayScores(
   );
 }
 
+function sleep(ms: number) {
+  return new Promise(r => setTimeout(r, ms));
+}
+
+export const BACKFILL_DAYS = 30;
+
+/**
+ * Backfill the last `days` days (ET) from GeoSports. Each day retries once on
+ * transient failure — GeoSports errors intermittently under rapid sequential
+ * requests, which previously left silent holes in a new group's history.
+ * Upserts only, so it is always safe to re-run. On AuthError the group is
+ * deactivated and the error rethrown. Returns the number of rows written.
+ *
+ * NOTE: a full run takes ~20s — callers need `export const maxDuration = 60`.
+ */
+export async function backfillGroup(
+  groupCode: string,
+  sessionToken: string,
+  days = BACKFILL_DAYS
+): Promise<number> {
+  let written = 0;
+  try {
+    for (let i = 0; i < days; i++) {
+      const date = etDateMinusDays(i);
+      let played: GeoScoreEntry[] | null = await fetchDayScores(groupCode, sessionToken, date);
+      if (played === null) {
+        // transient failure — back off and retry once
+        await sleep(1200);
+        played = await fetchDayScores(groupCode, sessionToken, date);
+        if (played === null) console.error(`Backfill: ${groupCode} ${date} failed after retry`);
+      }
+      if (played && played.length > 0) {
+        await upsertDayScores(groupCode, date, played);
+        written += played.length;
+      }
+      await sleep(400); // polite pacing for GeoSports
+    }
+  } catch (err) {
+    if (err instanceof AuthError) {
+      await supabase.from('groups').update({ active: false }).eq('group_code', groupCode);
+    }
+    throw err;
+  }
+  await supabase
+    .from('groups')
+    .update({ last_synced_at: new Date().toISOString() })
+    .eq('group_code', groupCode);
+  console.log(`Backfill complete for ${groupCode}: ${written} rows over ${days} days`);
+  return written;
+}
+
 /**
  * Sync today and yesterday (Eastern time) for a group. Yesterday is included so
  * plays made between the previous day's last sync and midnight ET are still

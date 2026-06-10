@@ -2,9 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { waitUntil } from '@vercel/functions';
 import { supabase } from '@/lib/supabase';
 import { encrypt } from '@/lib/crypto';
-import { fetchGroupInfo, fetchDayScores, AuthError } from '@/lib/geosports';
-import { upsertDayScores } from '@/lib/sync';
-import { etDateMinusDays } from '@/lib/dates';
+import { fetchGroupInfo } from '@/lib/geosports';
+import { backfillGroup } from '@/lib/sync';
+
+// Backfill takes ~20s — allow up to 60s (Vercel default 10s would kill it mid-run)
+export const maxDuration = 60;
 
 const GROUP_CODE_RE = /^[A-Z0-9]{3,10}$/;
 
@@ -75,34 +77,15 @@ export async function POST(req: NextRequest) {
   }
 
   // Backfill last 30 days in the background — doesn't block the response
-  waitUntil(backfillGroup(code, token));
+  waitUntil(
+    backfillGroup(code, token).catch(err =>
+      console.error(`Registration backfill failed for ${code}:`, err)
+    )
+  );
 
   return NextResponse.json({
     group_code: code,
     group_name: groupName,
     url: `/g/${code}`,
   });
-}
-
-async function backfillGroup(groupCode: string, sessionToken: string) {
-  for (let i = 0; i < 30; i++) {
-    const date = etDateMinusDays(i);
-
-    try {
-      const played = await fetchDayScores(groupCode, sessionToken, date);
-      if (played && played.length > 0) await upsertDayScores(groupCode, date, played);
-    } catch (err) {
-      if (err instanceof AuthError) return; // token died mid-backfill — stop
-      console.error(`Backfill error for ${groupCode} on ${date}:`, err);
-    }
-
-    // Polite delay between requests
-    await new Promise(r => setTimeout(r, 300));
-  }
-
-  // Mark last synced
-  await supabase
-    .from('groups')
-    .update({ last_synced_at: new Date().toISOString() })
-    .eq('group_code', groupCode);
 }
