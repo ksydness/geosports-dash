@@ -94,7 +94,8 @@ lib/
 
 ## Key Architecture Decisions
 
-- **Stale-while-revalidate sync**: `/api/scores` triggers a background sync via `waitUntil()` if `last_synced_at` > 10 minutes ago. Compensates for Vercel Hobby's single daily cron limit.
+- **Stale-while-revalidate sync**: `/api/scores` triggers a background sync via `waitUntil()` if `last_synced_at` > 3 minutes ago. Compensates for Vercel Hobby's single daily cron limit.
+- **Live sync on Refresh**: `/api/scores/{code}?sync=1` (used by the dashboard Refresh button) awaits a GeoSports sync *before* responding, so a fresh play appears in one refresh.
 - **Lazy Supabase client**: Proxy pattern avoids `supabaseUrl is required` errors at Next.js build time.
 - **Browser-like headers**: GeoSports API calls include `User-Agent`, `Referer`, `Origin` to avoid 401s.
 - **`.npmrc` with `legacy-peer-deps=true`**: Required for Vercel to resolve Next.js 15 / React 19 peer dep conflict.

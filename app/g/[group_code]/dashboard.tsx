@@ -102,7 +102,9 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
 
   // ── Data loading ─────────────────────────────────────────────────────────────
 
-  async function loadScores() {
+  // forceSync = true (Refresh button) asks the server to pull from GeoSports
+  // before responding, so a new play appears in a single refresh.
+  async function loadScores(forceSync = false) {
     // If pre-loaded demo data was provided, use it directly — no fetch needed
     if (initialData) {
       allScores = initialData.scores || [];
@@ -114,9 +116,10 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
       return;
     }
 
-    setContent('<div class="loading">Loading scores…</div>');
+    // Keep the current view visible while a live sync runs
+    if (!forceSync) setContent('<div class="loading">Loading scores…</div>');
     try {
-      const res = await fetch(`/api/scores/${groupCode}`);
+      const res = await fetch(`/api/scores/${groupCode}${forceSync ? '?sync=1' : ''}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to load');
       allScores = data.scores || [];
@@ -179,7 +182,7 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
   (window as any).refreshNow = async function() {
     const btn = document.querySelector('.sync-btn') as HTMLButtonElement;
     if (btn) { btn.textContent = '↻ Syncing…'; btn.disabled = true; }
-    await loadScores();
+    await loadScores(true);
     if (btn) { btn.textContent = '↻ Refresh'; btn.disabled = false; }
   };
 
