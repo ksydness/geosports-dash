@@ -341,7 +341,8 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
         const u = stats[p.username];
         u.daysPlayed++; u.totalScore += p.score;
         if (p.score > u.bestScore) u.bestScore = p.score;
-        if (p.score >= top) u.daysWon++;
+        // Solo days don't count as wins — beating nobody is no victory
+        if (players.length >= 2 && p.score >= top) u.daysWon++;
         players.forEach(q => {
           if (q.username === p.username || !u.h2h[q.username]) return;
           if (p.score > q.score) u.h2h[q.username].w++;
@@ -371,10 +372,10 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
     });
     const byWeek: Record<string,Record<string,number>> = {};
     allScores.forEach(s => { const wk=getWeekKey(s.date); if(!byWeek[wk])byWeek[wk]={}; byWeek[wk][s.username]=(byWeek[wk][s.username]||0)+s.score; });
-    Object.values(byWeek).forEach(wk => { const top=Math.max(...Object.values(wk)); Object.entries(wk).forEach(([u,sc])=>{if(sc>=top&&stats[u])stats[u].weeksWon++;}); });
+    Object.values(byWeek).forEach(wk => { if(Object.keys(wk).length<2)return; const top=Math.max(...Object.values(wk)); Object.entries(wk).forEach(([u,sc])=>{if(sc>=top&&stats[u])stats[u].weeksWon++;}); });
     const byMonth: Record<string,Record<string,number>> = {};
     allScores.forEach(s => { const mk=s.date.slice(0,7); if(!byMonth[mk])byMonth[mk]={}; byMonth[mk][s.username]=(byMonth[mk][s.username]||0)+s.score; });
-    Object.values(byMonth).forEach(mk => { const top=Math.max(...Object.values(mk)); Object.entries(mk).forEach(([u,sc])=>{if(sc>=top&&stats[u])stats[u].monthsWon++;}); });
+    Object.values(byMonth).forEach(mk => { if(Object.keys(mk).length<2)return; const top=Math.max(...Object.values(mk)); Object.entries(mk).forEach(([u,sc])=>{if(sc>=top&&stats[u])stats[u].monthsWon++;}); });
     allUsers.forEach(u => { stats[u].avg = stats[u].daysPlayed>0?Math.round(stats[u].totalScore/stats[u].daysPlayed):0; });
     return stats;
   }

@@ -122,4 +122,4 @@ The dashboard (`app/g/[group_code]/dashboard.tsx`) has 5 tabs:
 2. **Week** — day-by-day score list
 3. **Month** — question averages for current month
 4. **All Time** — question averages across all history
-5. **Stats** — records (best/worst day) + head-to-head comparison
+5. **Stats** — records (best/worst day) + head-to-head comparison. Day/week/month "wins" require ≥2 participants in that period — solo play never counts as a win.
