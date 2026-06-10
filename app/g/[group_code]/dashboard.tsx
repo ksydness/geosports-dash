@@ -221,7 +221,7 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
 
   // ── Breakdown builders ────────────────────────────────────────────────────────
 
-  function buildTodayBreakdown(rawScores: number[], date: string, groupAvgs: number[] | null) {
+  function buildTodayBreakdown(rawScores: number[], date: string, groupAvgs: number[] | null, username: string) {
     if (rawScores.length !== 5) return '';
     const prompts = questionsCache[date] || [];
     const dots = rawScores.map(r => `<div class="dot ${dotClass(r)}"></div>`).join('');
@@ -242,19 +242,23 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
         </div>
       </div>`;
     }).join('');
-    return `<div class="breakdown-inner"><div class="dot-row">${dots}</div>${bars}</div>`;
+    const u = username.replace(/'/g, "\\'");
+    const mapBtn = `<button class="user-map-btn" onclick="event.stopPropagation();openUserMap('${date}','${u}')">\ud83c\udfaf See ${username}'s guesses on the map</button>`;
+    return `<div class="breakdown-inner"><div class="dot-row">${dots}</div>${bars}${mapBtn}</div>`;
   }
 
-  function buildDayList(days: {date:string;score:number;rawScores?:number[]|null}[]) {
+  function buildDayList(days: {date:string;score:number;rawScores?:number[]|null}[], username: string) {
     const rows = [...days].reverse().map(d => {
       const tc = totalTierClass(d.score, 1000);
       const dots = (d.rawScores || []).map(r => `<div class="mini-dot ${dotClass(r)}"></div>`).join('');
       const mapIcon = `<button class="day-map-icon" onclick="event.stopPropagation();openMapReview('${d.date}')" title="View on map">📍</button>`;
+      const uu = username.replace(/'/g, "\\'");
+      const ringIcon = `<button class="day-map-icon" onclick="event.stopPropagation();openUserMap('${d.date}','${uu}')" title="See this player\u2019s distance rings">\ud83c\udfaf</button>`;
       return `<div class="day-row">
         <div class="day-date-lbl">${formatDisplayDate(d.date)}</div>
         <div class="day-score-num ${tc}">${d.score}</div>
         ${dots ? `<div class="day-mini-dots">${dots}</div>` : ''}
-        ${mapIcon}
+        ${mapIcon}${ringIcon}
       </div>`;
     }).join('');
     return `<div class="breakdown-inner">${rows}</div>`;
@@ -414,8 +418,8 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
         const tClass = e.total!==null?totalTierClass(isToday?e.total:e.avg??0,1000):'';
         let breakdownContent = '';
         if (e.played) {
-          if (isToday) { const raw=e.days[0]?.rawScores; if(raw&&raw.length===5)breakdownContent=buildTodayBreakdown(raw,start,groupAvgs); }
-          else if (tab==='week') { if(e.days.length>0)breakdownContent=buildDayList(e.days); }
+          if (isToday) { const raw=e.days[0]?.rawScores; if(raw&&raw.length===5)breakdownContent=buildTodayBreakdown(raw,start,groupAvgs,e.username); }
+          else if (tab==='week') { if(e.days.length>0)breakdownContent=buildDayList(e.days,e.username); }
           else { const qAvgs=computeQAvgs(e.days); if(qAvgs){const n=e.days.filter(d=>d.rawScores&&d.rawScores.length===5).length;breakdownContent=buildQAvgBreakdown(qAvgs,n);} }
         }
         const hasBreak = breakdownContent.length>0;
@@ -530,33 +534,60 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
 
   const PIN_COLORS = ['#3b82f6','#8b5cf6','#ec4899','#f59e0b','#10b981'];
 
-  function showMapInfoPanel(guess: any, prompt: string, index: number) {
+  // Invert the published scoring curve: raw per-question points (0-100) -> miles off.
+  const SCORE_CURVE: [number, number][] = [[0,100],[500,70],[1000,56],[2000,45],[3000,36],[4000,28],[5000,22],[12450,0]];
+  function pointsToMiles(p: number): number {
+    if (p >= 100) return 0;
+    if (p <= 0) return 12450;
+    for (let i = 0; i < SCORE_CURVE.length - 1; i++) {
+      const [m1, p1] = SCORE_CURVE[i];
+      const [m2, p2] = SCORE_CURVE[i + 1];
+      if (p <= p1 && p >= p2) return m1 + ((p1 - p) / (p1 - p2)) * (m2 - m1);
+    }
+    return 12450;
+  }
+  // Geodesic circle polygon (lng/lat ring) around a point.
+  function circleCoords(lat: number, lng: number, radiusMiles: number, n = 96): number[][] {
+    const R = 3958.8, d = radiusMiles / R;
+    const la = lat * Math.PI / 180, lo = lng * Math.PI / 180;
+    const out: number[][] = [];
+    for (let i = 0; i <= n; i++) {
+      const b = 2 * Math.PI * i / n;
+      const la2 = Math.asin(Math.sin(la) * Math.cos(d) + Math.cos(la) * Math.sin(d) * Math.cos(b));
+      const lo2 = lo + Math.atan2(Math.sin(b) * Math.sin(d) * Math.cos(la), Math.cos(d) - Math.sin(la) * Math.sin(la2));
+      out.push([lo2 * 180 / Math.PI, la2 * 180 / Math.PI]);
+    }
+    return out;
+  }
+
+  function showMapInfoPanel(guess: any, prompt: string, index: number, ring?: { miles: number; pts: number } | null) {
     const panel = document.getElementById('mapInfoPanel');
     if (!panel) return;
     const color = PIN_COLORS[index];
+    const ringLine = ring ? `<div class="map-info-dist" style="color:${color}">≈ ${ring.miles.toLocaleString()} mi off · ${ring.pts} pts</div>` : '';
     panel.innerHTML = `
       <div class="map-info-inner">
         <div class="map-info-qnum" style="color:${color}">Q${index + 1}</div>
         <div class="map-info-prompt">${prompt || ''}</div>
         <div class="map-info-answer">📍 ${guess.answer.name}</div>
+        ${ringLine}
         ${guess.answer.story ? `<div class="map-info-story">${guess.answer.story}</div>` : ''}
       </div>`;
   }
 
-  (window as any).openMapReview = async function(date: string) {
+  // Shared renderer. userRawScores null = plain answer-key map; array = per-user distance rings.
+  async function renderMap(date: string, modalTitle: string, userRawScores: number[] | null) {
     const modal = document.getElementById('mapModal');
     const title = document.getElementById('mapModalTitle');
     const container = document.getElementById('mapContainer');
     const panel = document.getElementById('mapInfoPanel');
     if (!modal || !container || !panel) return;
 
-    if (title) title.textContent = `${formatDisplayDate(date)} answers`;
+    if (title) title.textContent = modalTitle;
     panel.innerHTML = '<div class="map-info-loading">Loading…</div>';
     modal.style.display = 'flex';
     document.body.style.overflow = 'hidden';
 
-    // Fetch the daily answer key from the public guess endpoint — available as soon
-    // as the round publishes, no played round required.
     let data: any;
     try {
       const res = await fetch(`/api/answers?date=${date}`);
@@ -578,8 +609,6 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
 
     await loadMapLibre();
     const maplibregl = (window as any).maplibregl;
-
-    // Destroy previous map if any
     if (mapInstance) { mapInstance.remove(); mapInstance = null; }
     container.innerHTML = '';
 
@@ -595,35 +624,48 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
     mapInstance = map;
 
     const prompts = questionsCache[date] || [];
+    const ringFor = (i: number): { miles: number; pts: number } | null => {
+      if (!userRawScores || userRawScores.length <= i) return null;
+      const pts = userRawScores[i];
+      return { miles: Math.round(pointsToMiles(pts)), pts };
+    };
 
     map.on('load', () => {
-      const bounds: [[number,number],[number,number]] = [[180,90],[-180,-90]];
+      const bounds = new maplibregl.LngLatBounds();
 
       guesses.forEach((g: any, i: number) => {
         const color = PIN_COLORS[i];
+        const ring = ringFor(i);
+
+        if (ring) {
+          const coords = circleCoords(g.answer.lat, g.answer.lng, ring.miles);
+          map.addSource(`ring-${i}`, { type: 'geojson', data: { type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: [coords] } } });
+          map.addLayer({ id: `ring-fill-${i}`, type: 'fill', source: `ring-${i}`, paint: { 'fill-color': color, 'fill-opacity': 0.12 } });
+          map.addLayer({ id: `ring-line-${i}`, type: 'line', source: `ring-${i}`, paint: { 'line-color': color, 'line-width': 2, 'line-opacity': 0.7 } });
+          coords.forEach(c => bounds.extend(c as [number, number]));
+        }
+
         const el = document.createElement('div');
         el.style.cssText = `width:28px;height:28px;border-radius:50%;background:${color};border:2px solid #fff;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:#fff;box-shadow:0 2px 6px rgba(0,0,0,0.5);cursor:pointer`;
         el.textContent = String(i + 1);
-        el.addEventListener('click', () => showMapInfoPanel(g, prompts[i] || '', i));
-
-        new maplibregl.Marker({ element: el })
-          .setLngLat([g.answer.lng, g.answer.lat])
-          .addTo(map);
-
-        if (g.answer.lng < bounds[0][0]) bounds[0][0] = g.answer.lng;
-        if (g.answer.lat < bounds[0][1]) bounds[0][1] = g.answer.lat;
-        if (g.answer.lng > bounds[1][0]) bounds[1][0] = g.answer.lng;
-        if (g.answer.lat > bounds[1][1]) bounds[1][1] = g.answer.lat;
+        el.addEventListener('click', () => showMapInfoPanel(g, prompts[i] || '', i, ring));
+        new maplibregl.Marker({ element: el }).setLngLat([g.answer.lng, g.answer.lat]).addTo(map);
+        bounds.extend([g.answer.lng, g.answer.lat]);
       });
 
-      if (guesses.length === 1) {
-        map.flyTo({ center: [guesses[0].answer.lng, guesses[0].answer.lat], zoom: 4 });
-      } else {
-        map.fitBounds(bounds, { padding: 60, maxZoom: 5, duration: 1200 });
-      }
-
-      showMapInfoPanel(guesses[0], prompts[0] || '', 0);
+      try { map.fitBounds(bounds, { padding: 60, maxZoom: 5, duration: 1000 }); } catch { /* noop */ }
+      showMapInfoPanel(guesses[0], prompts[0] || '', 0, ringFor(0));
     });
+  }
+
+  (window as any).openMapReview = function(date: string) {
+    renderMap(date, `${formatDisplayDate(date)} answers`, null);
+  };
+
+  (window as any).openUserMap = function(date: string, username: string) {
+    const rec = allScores.find(s => s.username === username && s.date === date);
+    const raw = rec && rec.rawScores && rec.rawScores.length === 5 ? rec.rawScores : null;
+    renderMap(date, `${username} · ${formatDisplayDate(date)}`, raw);
   };
 
   (window as any).closeMapReview = function() {
@@ -735,6 +777,9 @@ const CSS = `
   .period-label-row { display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; }
   .map-review-btn { background:rgba(59,130,246,0.12); border:1px solid rgba(59,130,246,0.3); border-radius:6px; color:#3b82f6; font-size:11px; font-weight:600; padding:4px 10px; cursor:pointer; transition:background 0.15s; }
   .map-review-btn:hover { background:rgba(59,130,246,0.22); }
+  .user-map-btn { display:block; width:100%; margin-top:14px; background:rgba(59,130,246,0.12); border:1px solid rgba(59,130,246,0.3); border-radius:8px; color:#3b82f6; font-size:12px; font-weight:600; padding:9px 10px; cursor:pointer; transition:background 0.15s; }
+  .user-map-btn:hover { background:rgba(59,130,246,0.22); }
+  .map-info-dist { font-size:13px; font-weight:700; margin-bottom:8px; font-variant-numeric:tabular-nums; }
   .day-map-icon { background:none; border:none; font-size:13px; cursor:pointer; opacity:0.5; padding:0 0 0 6px; transition:opacity 0.15s; line-height:1; }
   .day-map-icon:hover { opacity:1; }
 
