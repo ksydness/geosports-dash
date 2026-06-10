@@ -61,6 +61,12 @@ CREATE TABLE scores (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (group_code, date, username)
 );
+
+CREATE TABLE answers (
+  date DATE PRIMARY KEY,
+  guesses JSONB NOT NULL,  -- cached daily answer key from GeoSports guess endpoint
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 ```
 
 ## Project Structure
@@ -81,7 +87,9 @@ app/
 lib/
   supabase.ts   # Lazy-initialized Supabase client (Proxy pattern, avoids build errors)
   crypto.ts     # AES-256-GCM encrypt/decrypt for session tokens
-  geosports.ts  # GeoSports API client (fetchGroupInfo, fetchDayScores, fetchQuestions)
+  geosports.ts  # GeoSports API client (fetchGroupInfo, fetchDayScores, fetchQuestions, AuthError)
+  sync.ts       # Shared sync logic (syncGroup, upsertDayScores) — deactivates group on AuthError
+  dates.ts      # Eastern-time date helpers (todayET, etDateMinusDays)
 ```
 
 ## Key Architecture Decisions
@@ -91,6 +99,9 @@ lib/
 - **Browser-like headers**: GeoSports API calls include `User-Agent`, `Referer`, `Origin` to avoid 401s.
 - **`.npmrc` with `legacy-peer-deps=true`**: Required for Vercel to resolve Next.js 15 / React 19 peer dep conflict.
 - **Cron**: Single daily cron at `0 6 * * *` registered in `vercel.json`.
+- **Eastern time**: The game rolls over at midnight ET, so all "today" date math (server and client) uses `America/New_York` via `lib/dates.ts`. Syncs cover today + yesterday (ET) to catch plays made after the previous day's last sync.
+- **Answer key cache**: `/api/answers` serves from the Supabase `answers` table when populated; otherwise fetches from GeoSports' guess endpoint and caches. Past dates are immutable (long `Cache-Control`).
+- **Escaping**: dashboard.tsx renders via innerHTML — all untrusted strings (usernames, prompts, answer names/stories) must go through `esc()`, and inline handler args through `attrJs()`.
 
 ## GeoSports API
 

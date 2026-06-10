@@ -112,7 +112,7 @@ export default function Home() {
               value={email}
               onChange={e => setEmail(e.target.value)}
             />
-            <p style={styles.hint}>We&apos;ll notify you if your token expires and syncing stops.</p>
+            <p style={styles.hint}>For future updates about GeoSports Dash. If your token expires, a banner will appear on your dashboard.</p>
           </div>
 
           {error && <div style={styles.errorBox}>{error}</div>}

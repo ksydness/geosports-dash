@@ -2,7 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { waitUntil } from '@vercel/functions';
 import { supabase } from '@/lib/supabase';
 import { encrypt } from '@/lib/crypto';
-import { fetchGroupInfo, fetchDayScores } from '@/lib/geosports';
+import { fetchGroupInfo, fetchDayScores, AuthError } from '@/lib/geosports';
+import { upsertDayScores } from '@/lib/sync';
+import { etDateMinusDays } from '@/lib/dates';
+
+const GROUP_CODE_RE = /^[A-Z0-9]{3,10}$/;
 
 export async function POST(req: NextRequest) {
   let body: { group_code?: string; session_token?: string; email?: string };
@@ -24,6 +28,13 @@ export async function POST(req: NextRequest) {
   const code = group_code.trim().toUpperCase();
   const token = session_token.trim();
 
+  if (!GROUP_CODE_RE.test(code)) {
+    return NextResponse.json(
+      { error: 'Invalid group code — expected 3-10 letters/numbers' },
+      { status: 400 }
+    );
+  }
+
   // Validate credentials and fetch group info from GeoSports
   let groupData;
   try {
@@ -32,10 +43,6 @@ export async function POST(req: NextRequest) {
     const message = err instanceof Error ? err.message : 'Failed to verify credentials';
     return NextResponse.json({ error: message }, { status: 401 });
   }
-
-  // Log raw response so we can discover the actual field names
-  console.log('[register] GeoSports groupData keys:', Object.keys(groupData as object));
-  console.log('[register] GeoSports groupData:', JSON.stringify(groupData));
 
   // Extract group name — try several possible field names
   const raw = groupData as Record<string, unknown>;
@@ -79,25 +86,13 @@ export async function POST(req: NextRequest) {
 
 async function backfillGroup(groupCode: string, sessionToken: string) {
   for (let i = 0; i < 30; i++) {
-    const d = new Date();
-    d.setDate(d.getDate() - i);
-    const date = d.toISOString().slice(0, 10);
+    const date = etDateMinusDays(i);
 
     try {
       const played = await fetchDayScores(groupCode, sessionToken, date);
-      if (!played || played.length === 0) continue;
-
-      await supabase.from('scores').upsert(
-        played.map(s => ({
-          group_code: groupCode,
-          date,
-          username: s.username,
-          score: s.score,
-          raw_scores: s.rawScores ?? null,
-        })),
-        { onConflict: 'group_code,date,username' }
-      );
+      if (played && played.length > 0) await upsertDayScores(groupCode, date, played);
     } catch (err) {
+      if (err instanceof AuthError) return; // token died mid-backfill — stop
       console.error(`Backfill error for ${groupCode} on ${date}:`, err);
     }
 

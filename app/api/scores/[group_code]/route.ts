@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { waitUntil } from '@vercel/functions';
 import { supabase } from '@/lib/supabase';
-import { decrypt } from '@/lib/crypto';
-import { fetchDayScores } from '@/lib/geosports';
+import { syncGroup } from '@/lib/sync';
 
 const STALE_AFTER_MS = 10 * 60 * 1000; // 10 minutes
 
@@ -37,7 +36,11 @@ export async function GET(
     const lastSync = group.last_synced_at ? new Date(group.last_synced_at).getTime() : 0;
     const isStale = Date.now() - lastSync > STALE_AFTER_MS;
     if (isStale) {
-      waitUntil(syncGroup(code, group.session_token));
+      waitUntil(
+        syncGroup(code, group.session_token).catch(err =>
+          console.error(`Background sync failed for ${code}:`, err)
+        )
+      );
     }
   }
 
@@ -52,32 +55,4 @@ export async function GET(
       rawScores: s.raw_scores,
     })),
   });
-}
-
-async function syncGroup(groupCode: string, encryptedToken: string) {
-  try {
-    const token = decrypt(encryptedToken);
-    const today = new Date().toISOString().slice(0, 10);
-    const played = await fetchDayScores(groupCode, token, today);
-
-    if (played && played.length > 0) {
-      await supabase.from('scores').upsert(
-        played.map(s => ({
-          group_code: groupCode,
-          date: today,
-          username: s.username,
-          score: s.score,
-          raw_scores: s.rawScores ?? null,
-        })),
-        { onConflict: 'group_code,date,username' }
-      );
-    }
-
-    await supabase
-      .from('groups')
-      .update({ last_synced_at: new Date().toISOString() })
-      .eq('group_code', groupCode);
-  } catch (err) {
-    console.error(`Background sync failed for ${groupCode}:`, err);
-  }
 }

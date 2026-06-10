@@ -1,19 +1,44 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { supabase } from '@/lib/supabase';
+import { todayET } from '@/lib/dates';
 
 const BASE = 'https://geosports.app';
 const MAX_QUESTIONS = 10;
+const MIN_QUESTIONS = 5; // a round has 5 questions — don't cache partial fetches
 
-// Returns the daily answer key (correct locations + stories) for a given date by
-// querying GeoSports' public guess endpoint. No auth / no played round required —
-// answers are available as soon as the round publishes (today or any past date).
+type Guess = { questionId?: string; answer: { lat: number; lng: number; name: string; story?: string } };
+
+// Returns the daily answer key (correct locations + stories) for a given date.
+// Served from the Supabase `answers` cache when available; otherwise fetched
+// from GeoSports' public guess endpoint and cached. The answer key for a date
+// never changes once published, so past dates are immutable.
 export async function GET(req: NextRequest) {
   const date = req.nextUrl.searchParams.get('date');
   if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
     return NextResponse.json({ error: 'date param required (YYYY-MM-DD)' }, { status: 400 });
   }
 
-  // Throwaway anonymous identity — guess endpoint gates question order per clientId,
-  // so we walk q0..N sequentially with one disposable id.
+  const cacheHeaders = {
+    // Past answer keys are immutable; today's gets a short edge cache
+    'Cache-Control':
+      date < todayET()
+        ? 'public, s-maxage=31536000, max-age=3600, immutable'
+        : 'public, s-maxage=300, max-age=60',
+  };
+
+  // 1. Serve from cache if we have it
+  const { data: cached } = await supabase
+    .from('answers')
+    .select('guesses')
+    .eq('date', date)
+    .maybeSingle();
+
+  if (cached?.guesses) {
+    return NextResponse.json({ date, guesses: cached.guesses }, { headers: cacheHeaders });
+  }
+
+  // 2. Fetch from GeoSports. Throwaway anonymous identity — guess endpoint gates
+  // question order per clientId, so we walk q0..N sequentially with one disposable id.
   const clientId = `dash-${date}-${Math.random().toString(36).slice(2)}`;
   const headers = {
     'Content-Type': 'application/json',
@@ -23,7 +48,7 @@ export async function GET(req: NextRequest) {
     Origin: 'https://geosports.app',
   };
 
-  const guesses: Array<{ questionId?: string; answer: { lat: number; lng: number; name: string; story?: string } }> = [];
+  const guesses: Guess[] = [];
 
   for (let i = 0; i < MAX_QUESTIONS; i++) {
     let res: Response;
@@ -45,5 +70,16 @@ export async function GET(req: NextRequest) {
   if (guesses.length === 0) {
     return NextResponse.json({ error: 'No answers available for this date' }, { status: 404 });
   }
-  return NextResponse.json({ date, guesses });
+
+  // 3. Cache the full answer key (skip partial fetches so a transient failure
+  // doesn't get frozen forever)
+  if (guesses.length >= MIN_QUESTIONS) {
+    const { error: insertError } = await supabase.from('answers').upsert(
+      { date, guesses },
+      { onConflict: 'date' }
+    );
+    if (insertError) console.error(`Failed to cache answers for ${date}:`, insertError);
+  }
+
+  return NextResponse.json({ date, guesses }, { headers: cacheHeaders });
 }

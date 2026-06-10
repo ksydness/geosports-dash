@@ -64,6 +64,30 @@ export default function Dashboard({ groupCode, initialData }: Props) {
   );
 }
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+// Escape untrusted strings for safe interpolation into innerHTML.
+function esc(s: unknown): string {
+  return String(s ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+// Encode a value as a JS string literal that is safe inside an inline
+// event-handler attribute (the HTML parser decodes entities before JS runs).
+function attrJs(s: string): string {
+  return esc(JSON.stringify(s));
+}
+
+// The game rolls over at midnight Eastern — "today" must match the server.
+const ET_FORMAT = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' });
+function todayETStr(): string {
+  return ET_FORMAT.format(new Date());
+}
+
 // ─── Dashboard logic ──────────────────────────────────────────────────────────
 
 function initDashboard(groupCode: string, initialData?: InitialData) {
@@ -103,7 +127,7 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
       renderTab(currentTab);
       renderFooter();
     } catch (e: any) {
-      setContent(`<div class="error-box">Could not load scores.<br><small>${e.message}</small></div>`);
+      setContent(`<div class="error-box">Could not load scores.<br><small>${esc(e.message)}</small></div>`);
     }
   }
 
@@ -165,8 +189,8 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
     return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
   }
   function getDateRange(tab: string) {
-    const today = new Date();
-    const todayStr = toDateStr(today);
+    const todayStr = todayETStr();
+    const today = new Date(todayStr + 'T00:00:00');
     if (tab === 'today') return { start: todayStr, end: todayStr, label: todayStr };
     if (tab === 'week') {
       const d = new Date(today);
@@ -233,7 +257,7 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
       return `<div class="q-row ${prompt ? 'has-prompt' : 'no-prompt'}">
         <div class="q-label">Q${i+1}</div>
         <div class="q-middle">
-          ${prompt ? `<div class="q-prompt-text">${prompt}</div>` : ''}
+          ${prompt ? `<div class="q-prompt-text">${esc(prompt)}</div>` : ''}
           <div class="q-bar-row"><div class="q-bar-track"><div class="q-bar-fill ${barClass(r)}" style="width:${pct}%"></div></div></div>
         </div>
         <div class="q-pts-col">
@@ -242,8 +266,7 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
         </div>
       </div>`;
     }).join('');
-    const u = username.replace(/'/g, "\\'");
-    const mapBtn = `<button class="user-map-btn" onclick="event.stopPropagation();openUserMap('${date}','${u}')">\ud83c\udfaf See ${username}'s guesses on the map</button>`;
+    const mapBtn = `<button class="user-map-btn" onclick="event.stopPropagation();openUserMap('${date}',${attrJs(username)})">\ud83c\udfaf See ${esc(username)}'s guesses on the map</button>`;
     return `<div class="breakdown-inner"><div class="dot-row">${dots}</div>${bars}${mapBtn}</div>`;
   }
 
@@ -252,8 +275,7 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
       const tc = totalTierClass(d.score, 1000);
       const dots = (d.rawScores || []).map(r => `<div class="mini-dot ${dotClass(r)}"></div>`).join('');
       const mapIcon = `<button class="day-map-icon" onclick="event.stopPropagation();openMapReview('${d.date}')" title="View on map">📍</button>`;
-      const uu = username.replace(/'/g, "\\'");
-      const ringIcon = `<button class="day-map-icon" onclick="event.stopPropagation();openUserMap('${d.date}','${uu}')" title="See this player\u2019s distance rings">\ud83c\udfaf</button>`;
+      const ringIcon = `<button class="day-map-icon" onclick="event.stopPropagation();openUserMap('${d.date}',${attrJs(username)})" title="See this player\u2019s distance rings">\ud83c\udfaf</button>`;
       return `<div class="day-row">
         <div class="day-date-lbl">${formatDisplayDate(d.date)}</div>
         <div class="day-score-num ${tc}">${d.score}</div>
@@ -336,8 +358,8 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
       let best=1,run=1;
       for (let i=1;i<dates.length;i++) { run = daysBetween(dates[i-1],dates[i])===1?run+1:1; if(run>best)best=run; }
       stats[u].bestStreak = best;
-      const today = toDateStr(new Date());
-      const yestD = new Date(); yestD.setDate(yestD.getDate()-1);
+      const today = todayETStr();
+      const yestD = new Date(today + 'T00:00:00'); yestD.setDate(yestD.getDate()-1);
       const yest = toDateStr(yestD);
       const last = dates[dates.length-1];
       let curr = 0;
@@ -423,7 +445,6 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
           else { const qAvgs=computeQAvgs(e.days); if(qAvgs){const n=e.days.filter(d=>d.rawScores&&d.rawScores.length===5).length;breakdownContent=buildQAvgBreakdown(qAvgs,n);} }
         }
         const hasBreak = breakdownContent.length>0;
-        const username = e.username.replace(/'/g,"\\'");
         let scoreHtml: string;
         if (e.played) {
           if (isToday) scoreHtml=`<div class="score-col"><div class="score-main ${tClass}">${e.total}</div><div class="score-sub">/ 1,000</div></div>`;
@@ -432,11 +453,11 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
           scoreHtml=`<div class="score-col no-played">Not played</div>`;
         }
         const isExpanded = openEntry===e.username;
-        html += `<div class="entry-wrap" data-username="${e.username}">
-          <div class="entry${hasBreak?' expandable':''}${isExpanded?' expanded':''}" ${hasBreak?`onclick="toggleBreakdown('${username}')"`:''}>
+        html += `<div class="entry-wrap" data-username="${esc(e.username)}">
+          <div class="entry${hasBreak?' expandable':''}${isExpanded?' expanded':''}" ${hasBreak?`onclick="toggleBreakdown(${attrJs(e.username)})"`:''}>
             <div class="rank">${rankStr}</div>
-            <div class="avatar">${initials}</div>
-            <div class="info"><div class="name">${e.username}</div>${!isToday&&e.played?`<div class="sub">Best: ${e.best}</div>`:''}</div>
+            <div class="avatar">${esc(initials)}</div>
+            <div class="info"><div class="name">${esc(e.username)}</div>${!isToday&&e.played?`<div class="sub">Best: ${e.best}</div>`:''}</div>
             ${scoreHtml}
             ${hasBreak?'<div class="chevron">▾</div>':''}
           </div>
@@ -447,7 +468,8 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
     html += '</div>';
     setContent(html);
     if (openEntry) {
-      const wrap = document.querySelector(`.entry-wrap[data-username="${openEntry}"]`);
+      // note: window.CSS — the module-level CSS string constant shadows the global
+      const wrap = document.querySelector(`.entry-wrap[data-username="${window.CSS.escape(openEntry)}"]`);
       if (wrap) { wrap.querySelector('.breakdown')?.classList.add('open'); wrap.querySelector('.entry')?.classList.add('expanded'); }
     }
   }
@@ -468,13 +490,13 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
       {emoji:'📊',val:bestAvg?.avg??0,name:bestAvg?.username??'—',lbl:'Best Average'},
       {emoji:'🔥',val:bestStrk?.bestStreak??0,name:bestStrk?.username??'—',lbl:'Longest Streak'},
     ];
-    const recordsHtml = records.map(r=>`<div class="record-card"><div class="record-emoji">${r.emoji}</div><div class="record-val">${r.val}</div><div class="record-name">${r.name}</div><div class="record-lbl">${r.lbl}</div></div>`).join('');
+    const recordsHtml = records.map(r=>`<div class="record-card"><div class="record-emoji">${r.emoji}</div><div class="record-val">${r.val}</div><div class="record-name">${esc(r.name)}</div><div class="record-lbl">${r.lbl}</div></div>`).join('');
     const sorted = [...users].sort((a,b)=>b.daysWon-a.daysWon||b.avg-a.avg);
     let html = `<div class="period-label">ALL TIME</div><div class="stats-records">${recordsHtml}</div><div class="stats-section-lbl">Player Stats</div><div class="card">`;
     sorted.forEach(u => {
       const initials = u.username.split(/\s+/).map((w:string)=>w[0]).join('').slice(0,2).toUpperCase();
       const h2hEntries = Object.entries(u.h2h).filter(([,r])=>r.w+r.l+r.t>0);
-      const h2hHtml = h2hEntries.length?`<div class="h2h-section-title">Head-to-Head</div>${h2hEntries.sort((a,b)=>b[1].w-a[1].w).map(([opp,r])=>`<div class="h2h-row"><div class="h2h-name">${opp}</div><div class="h2h-record"><span class="h2h-w">${r.w}W</span><span class="h2h-t" style="margin:0 3px">·</span><span class="h2h-l">${r.l}L</span>${r.t>0?`<span class="h2h-t" style="margin:0 3px">·</span><span class="h2h-t">${r.t}T</span>`:''}</div></div>`).join('')}`:'';
+      const h2hHtml = h2hEntries.length?`<div class="h2h-section-title">Head-to-Head</div>${h2hEntries.sort((a,b)=>b[1].w-a[1].w).map(([opp,r])=>`<div class="h2h-row"><div class="h2h-name">${esc(opp)}</div><div class="h2h-record"><span class="h2h-w">${r.w}W</span><span class="h2h-t" style="margin:0 3px">·</span><span class="h2h-l">${r.l}L</span>${r.t>0?`<span class="h2h-t" style="margin:0 3px">·</span><span class="h2h-t">${r.t}T</span>`:''}</div></div>`).join('')}`:'';
       const key = `stats-${u.username}`;
       const isExpanded = openEntry===key;
       const panelHtml = `<div class="breakdown-inner"><div class="stats-grid">
@@ -487,11 +509,10 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
         <div class="sg-item"><div class="sg-val">${u.weeksWon}</div><div class="sg-lbl">Weeks Won</div></div>
         <div class="sg-item"><div class="sg-val">${u.monthsWon}</div><div class="sg-lbl">Months Won</div></div>
       </div>${h2hHtml}</div>`;
-      const uKey = key.replace(/'/g,"\\'");
-      html += `<div class="entry-wrap" data-username="${key}">
-        <div class="entry expandable${isExpanded?' expanded':''}" onclick="toggleBreakdown('${uKey}')">
-          <div class="avatar">${initials}</div>
-          <div class="info"><div class="name">${u.username}</div><div class="sub">${u.daysWon} day${u.daysWon!==1?'s':''} won · ${u.daysPlayed} played</div></div>
+      html += `<div class="entry-wrap" data-username="${esc(key)}">
+        <div class="entry expandable${isExpanded?' expanded':''}" onclick="toggleBreakdown(${attrJs(key)})">
+          <div class="avatar">${esc(initials)}</div>
+          <div class="info"><div class="name">${esc(u.username)}</div><div class="sub">${u.daysWon} day${u.daysWon!==1?'s':''} won · ${u.daysPlayed} played</div></div>
           <div class="score-col"><div class="score-main">${u.avg}</div><div class="score-sub">avg</div></div>
           <div class="chevron">▾</div>
         </div>
@@ -568,10 +589,10 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
     panel.innerHTML = `
       <div class="map-info-inner">
         <div class="map-info-qnum" style="color:${color}">Q${index + 1}</div>
-        <div class="map-info-prompt">${prompt || ''}</div>
-        <div class="map-info-answer">📍 ${guess.answer.name}</div>
+        <div class="map-info-prompt">${esc(prompt || '')}</div>
+        <div class="map-info-answer">📍 ${esc(guess.answer.name)}</div>
         ${ringLine}
-        ${guess.answer.story ? `<div class="map-info-story">${guess.answer.story}</div>` : ''}
+        ${guess.answer.story ? `<div class="map-info-story">${esc(guess.answer.story)}</div>` : ''}
       </div>`;
   }
 
