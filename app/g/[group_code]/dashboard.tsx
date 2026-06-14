@@ -4,6 +4,7 @@ import { useEffect, useRef } from 'react';
 
 interface ScoreEntry {
   date: string;
+  userId?: string;
   username: string;
   score: number;
   rawScores?: number[];
@@ -90,11 +91,34 @@ function todayETStr(): string {
 
 // ─── Dashboard logic ──────────────────────────────────────────────────────────
 
+// Players are identified by a stable GeoSports userId; the display username is
+// mutable (people rename themselves mid-season). Collapse every row for a given
+// userId onto that user's most-recent username so renames don't fragment one
+// player into many. Rows without a userId (legacy) keep their own username.
+function canonicalizeNames<T extends {date:string;userId?:string;username:string}>(scores: T[]): T[] {
+  const latest: Record<string,{date:string;username:string}> = {};
+  for (const s of scores) {
+    if (!s.userId) continue;
+    if (!latest[s.userId] || s.date > latest[s.userId].date) {
+      latest[s.userId] = { date: s.date, username: s.username };
+    }
+  }
+  // Resolve display-name collisions across distinct userIds deterministically.
+  const display: Record<string,string> = {};
+  const seen = new Set<string>();
+  for (const id of Object.keys(latest).sort()) {
+    const base = latest[id].username;
+    display[id] = seen.has(base) ? `${base} (${id.slice(0,4)})` : base;
+    seen.add(base);
+  }
+  return scores.map(s => (s.userId && display[s.userId]) ? { ...s, username: display[s.userId] } : s);
+}
+
 function initDashboard(groupCode: string, initialData?: InitialData) {
   const Q_MULTIPLIERS = [1, 1, 2, 3, 3];
   const Q_MAX_PTS     = [100, 100, 200, 300, 300];
 
-  let allScores: {date:string;username:string;score:number;rawScores?:number[]}[] = [];
+  let allScores: {date:string;userId?:string;username:string;score:number;rawScores?:number[]}[] = [];
   let questionsCache: Record<string, string[]> = {};
   let currentTab = 'today';
   let lastFetched: Date | null = null;
@@ -107,7 +131,7 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
   async function loadScores(forceSync = false) {
     // If pre-loaded demo data was provided, use it directly — no fetch needed
     if (initialData) {
-      allScores = initialData.scores || [];
+      allScores = canonicalizeNames(initialData.scores || []);
       lastFetched = new Date();
       const title = document.getElementById('groupTitle');
       if (title) title.textContent = initialData.group_name || groupCode;
@@ -122,7 +146,7 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
       const res = await fetch(`/api/scores/${groupCode}${forceSync ? '?sync=1' : ''}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to load');
-      allScores = data.scores || [];
+      allScores = canonicalizeNames(data.scores || []);
       lastFetched = new Date();
       const title = document.getElementById('groupTitle');
       if (title) title.textContent = data.group_name || groupCode;

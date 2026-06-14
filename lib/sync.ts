@@ -11,14 +11,20 @@ export async function upsertDayScores(
 ): Promise<void> {
   if (!played.length) return;
   await supabase.from('scores').upsert(
-    played.map(s => ({
-      group_code: groupCode,
-      date,
-      username: s.username,
-      score: s.score,
-      raw_scores: s.rawScores ?? null,
-    })),
-    { onConflict: 'group_code,date,username' }
+    played
+      .filter(s => s.userId)
+      .map(s => ({
+        group_code: groupCode,
+        date,
+        user_id: s.userId,
+        username: s.username, // mutable display label — latest write wins
+        score: s.score,
+        // Only write raw_scores when present, so a later sync that lacks
+        // per-question detail (GeoSports drops it for older dates) never
+        // clobbers detail we already captured.
+        ...(s.rawScores != null ? { raw_scores: s.rawScores } : {}),
+      })),
+    { onConflict: 'group_code,date,user_id' }
   );
 }
 

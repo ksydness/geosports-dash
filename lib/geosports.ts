@@ -21,6 +21,8 @@ function authHeaders(sessionToken: string) {
 }
 
 export interface GeoScoreEntry {
+  /** Stable GeoSports user id (UUID). Identity — usernames are mutable. */
+  userId: string;
   username: string;
   score: number;
   rawScores?: number[];
@@ -78,7 +80,7 @@ export async function fetchDayScores(
   }
   if (data.error === 'Not authenticated' || data.error === 'Invalid session') throw new AuthError();
   if (data.error) return null;
-  return (data.leaderboard || []).filter(e => e.score !== null && e.score !== undefined);
+  return (data.leaderboard || []).filter(e => e.userId && e.score !== null && e.score !== undefined);
 }
 
 /** Proxy the public questions endpoint (no auth needed). */

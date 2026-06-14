@@ -56,7 +56,7 @@ export async function GET(
 
   const scoresRes = await supabase
     .from('scores')
-    .select('date, username, score, raw_scores')
+    .select('date, user_id, username, score, raw_scores')
     .eq('group_code', code)
     .order('date', { ascending: false });
 
@@ -66,6 +66,7 @@ export async function GET(
     last_synced_at: lastSyncedAt,
     scores: (scoresRes.data || []).map(s => ({
       date: s.date,
+      userId: s.user_id,
       username: s.username,
       score: s.score,
       rawScores: s.raw_scores,
