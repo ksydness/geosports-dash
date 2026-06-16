@@ -417,16 +417,17 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
 
   function computeAllStats() {
     const allUsers = [...new Set(allScores.map(s => s.username))];
-    type Stat = { username:string;daysPlayed:number;daysWon:number;weeksWon:number;monthsWon:number;totalScore:number;bestScore:number;avg:number;currentStreak:number;bestStreak:number;h2h:Record<string,{w:number;l:number;t:number}> };
+    type Stat = { username:string;daysPlayed:number;daysWon:number;weeksWon:number;monthsWon:number;totalScore:number;bestScore:number;avg:number;currentStreak:number;bestStreak:number;lastPlace:number;h2h:Record<string,{w:number;l:number;t:number}> };
     const stats: Record<string, Stat> = {};
     allUsers.forEach(u => {
-      stats[u] = { username:u,daysPlayed:0,daysWon:0,weeksWon:0,monthsWon:0,totalScore:0,bestScore:0,avg:0,currentStreak:0,bestStreak:0,h2h:{} };
+      stats[u] = { username:u,daysPlayed:0,daysWon:0,weeksWon:0,monthsWon:0,totalScore:0,bestScore:0,avg:0,currentStreak:0,bestStreak:0,lastPlace:0,h2h:{} };
       allUsers.forEach(v => { if (v !== u) stats[u].h2h[v] = {w:0,l:0,t:0}; });
     });
     const byDate: Record<string, typeof allScores> = {};
     allScores.forEach(s => { if (!byDate[s.date]) byDate[s.date]=[]; byDate[s.date].push(s); });
     Object.values(byDate).forEach(players => {
       const top = Math.max(...players.map(p => p.score));
+      const bot = Math.min(...players.map(p => p.score));
       players.forEach(p => {
         if (!stats[p.username]) return;
         const u = stats[p.username];
@@ -434,6 +435,8 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
         if (p.score > u.bestScore) u.bestScore = p.score;
         // Solo days don't count as wins — beating nobody is no victory
         if (players.length >= 2 && p.score >= top) u.daysWon++;
+        // Wooden spoon: last place only counts when there's someone to lose to
+        if (players.length >= 2 && p.score <= bot) u.lastPlace++;
         players.forEach(q => {
           if (q.username === p.username || !u.h2h[q.username]) return;
           if (p.score > q.score) u.h2h[q.username].w++;
@@ -586,8 +589,16 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
       {emoji:'🔥',val:bestStrk?.bestStreak??0,name:bestStrk?.username??'—',lbl:'Longest Streak'},
     ];
     const recordsHtml = records.map(r=>`<div class="record-card"><div class="record-emoji">${r.emoji}</div><div class="record-val">${r.val}</div><div class="record-name">${esc(r.name)}</div><div class="record-lbl">${r.lbl}</div></div>`).join('');
+    // ── Wooden Spoon — group-specific inside joke, only for Crank Drive, Putt off Green ──
+    let spoonHtml = '';
+    if (groupCode === 'TXA6HQ') {
+      const spoon = users.reduce((b,u)=>(!b||u.lastPlace>b.lastPlace)?u:b, null as typeof users[0]|null);
+      if (spoon && spoon.lastPlace>0) {
+        spoonHtml = `<div class="record-card wooden-spoon"><div class="record-emoji">🥄</div><div class="record-val">${spoon.lastPlace}</div><div class="record-name">${esc(spoon.username)}</div><div class="record-lbl">Wooden Spoon · Most Last-Place Finishes</div></div>`;
+      }
+    }
     const sorted = [...users].sort((a,b)=>b.daysWon-a.daysWon||b.avg-a.avg);
-    let html = `<div class="period-label">ALL TIME</div><div class="stats-records">${recordsHtml}</div><div class="stats-section-lbl">Player Stats</div><div class="card">`;
+    let html = `<div class="period-label">ALL TIME</div><div class="stats-records">${recordsHtml}${spoonHtml}</div><div class="stats-section-lbl">Player Stats</div><div class="card">`;
     sorted.forEach(u => {
       const initials = u.username.split(/\s+/).map((w:string)=>w[0]).join('').slice(0,2).toUpperCase();
       const h2hEntries = Object.entries(u.h2h).filter(([,r])=>r.w+r.l+r.t>0);
@@ -868,6 +879,8 @@ const CSS = `
   .record-val { font-size:18px; font-weight:700; font-variant-numeric:tabular-nums; }
   .record-name { font-size:12px; margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .record-lbl { font-size:10px; color:var(--muted); text-transform:uppercase; letter-spacing:0.06em; margin-top:5px; }
+  .record-card.wooden-spoon { grid-column:1 / -1; background:linear-gradient(135deg, rgba(180,120,40,0.14), rgba(180,120,40,0.05)); border-color:rgba(180,120,40,0.45); }
+  .record-card.wooden-spoon .record-lbl { color:#b47828; }
   .stats-section-lbl { font-size:11px; font-weight:600; letter-spacing:0.08em; text-transform:uppercase; color:var(--muted); margin-bottom:10px; }
   .stats-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:14px; }
   .sg-item { text-align:center; background:var(--surface2); border-radius:8px; padding:10px 6px; }
