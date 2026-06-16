@@ -150,9 +150,11 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
       lastFetched = new Date();
       const title = document.getElementById('groupTitle');
       if (title) title.textContent = data.group_name || groupCode;
-      if (!data.active) showInactiveBanner();
       renderTab(currentTab);
       renderFooter();
+      // Show AFTER renderTab — renderTab overwrites #tabContent's innerHTML,
+      // which would wipe a banner prepended beforehand.
+      if (!data.active) showInactiveBanner();
     } catch (e: any) {
       setContent(`<div class="error-box">Could not load scores.<br><small>${esc(e.message)}</small></div>`);
     }
@@ -170,11 +172,16 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
   }
 
   function showInactiveBanner() {
+    // Insert as a sibling BEFORE #tabContent (not inside it) so it survives the
+    // innerHTML resets that renderTab/setContent perform on every tab switch.
+    if (document.getElementById('inactiveBanner')) return; // dedupe
+    const content = document.getElementById('tabContent');
+    if (!content || !content.parentNode) return;
     const banner = document.createElement('div');
+    banner.id = 'inactiveBanner';
     banner.style.cssText = 'background:rgba(251,191,36,0.1);border:1px solid rgba(251,191,36,0.3);border-radius:8px;padding:10px 14px;font-size:12px;color:#fde68a;margin-bottom:12px;';
     banner.textContent = '⚠️ Sync paused — session token expired. Update your token to resume.';
-    const content = document.getElementById('tabContent');
-    if (content) content.prepend(banner);
+    content.parentNode.insertBefore(banner, content);
   }
 
   // ── Exposed globals ───────────────────────────────────────────────────────────
