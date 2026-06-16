@@ -859,43 +859,64 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
 
 
   // ── Secret practice game (triggered by the globe icon) ──────────────────────
+  // One persistent globe for the whole round: on reveal we ease to frame the
+  // guess + answer and draw the arc slowly; the next question keeps that exact
+  // camera and just clears the previous pins/line (matches GeoSports' feel).
   let gameRound: any[] = [];
   let gameIdx = 0;
   let gameTotal = 0;
   let gameRaw: number[] = [];
   let gameMap: any = null;
   let gameLocked = false;
-  const GAME_LABEL_LAYERS = ['label-city', 'label-town'];
+  let gameMarkers: any[] = [];
+  let gameAnimId = 0;
+  // City/town labels stay hidden the whole game so answers are never spelled out.
+  const GAME_HIDE_LAYERS = ['label-city', 'label-town'];
 
   function setGameScore() {
     const s = document.getElementById('gameScore');
     if (s) s.textContent = String(gameTotal);
   }
 
+  function clearGameOverlays() {
+    if (gameAnimId) { cancelAnimationFrame(gameAnimId); gameAnimId = 0; }
+    gameMarkers.forEach(m => m.remove());
+    gameMarkers = [];
+    if (!gameMap) return;
+    if (gameMap.getLayer('gc-line')) gameMap.removeLayer('gc-line');
+    if (gameMap.getSource('gc')) gameMap.removeSource('gc');
+  }
+
   function startGameQuestion() {
+    // No map recreation, no camera reset — just clear the previous overlays.
     gameLocked = false;
+    clearGameOverlays();
     const q = gameRound[gameIdx];
     const prog = document.getElementById('gameProgress');
     const prompt = document.getElementById('gamePrompt');
     const panel = document.getElementById('gamePanel');
-    const container = document.getElementById('gameMap');
     if (prog) prog.textContent = `Question ${gameIdx + 1} of ${gameRound.length}`;
     if (prompt) prompt.textContent = q.prompt;
     if (panel) panel.innerHTML = '<div class="game-hint">Tap the globe where you think the answer is</div>';
-    if (!container) return;
-    const maplibregl = (window as any).maplibregl;
-    if (gameMap) { gameMap.remove(); gameMap = null; }
-    container.innerHTML = '';
-    const map = new maplibregl.Map({
-      container, style: '/map-style.json', center: [0, 20], zoom: 1,
-      minZoom: -1, maxZoom: 10, projection: { type: 'globe' },
-    });
-    gameMap = map;
-    map.on('load', () => {
-      // Hide place-name labels so the answer city isn't given away.
-      GAME_LABEL_LAYERS.forEach(id => { if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', 'none'); });
-      map.on('click', (e: any) => handleGameGuess(e.lngLat.lng, e.lngLat.lat));
-    });
+  }
+
+  function animateGameLine(coords: number[][], durationMs: number, onDone: () => void) {
+    const src = gameMap.getSource('gc');
+    if (!src) return;
+    const start = performance.now();
+    const step = (now: number) => {
+      const t = Math.min(1, (now - start) / durationMs);
+      const ease = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2; // easeInOutQuad
+      const count = Math.max(2, Math.floor(ease * (coords.length - 1)) + 1);
+      src.setData({ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: coords.slice(0, count) } });
+      if (t < 1) {
+        gameAnimId = requestAnimationFrame(step);
+      } else {
+        gameAnimId = 0;
+        onDone();
+      }
+    };
+    gameAnimId = requestAnimationFrame(step);
   }
 
   function handleGameGuess(lng: number, lat: number) {
@@ -913,24 +934,29 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
     gameTotal += pts;
     setGameScore();
 
+    // Guess pin now; answer pin drops once the arc finishes drawing.
     const gp = document.createElement('div');
     gp.className = 'game-pin guess';
-    new maplibregl.Marker({ element: gp }).setLngLat([lng, lat]).addTo(map);
-    const ap = document.createElement('div');
-    ap.className = 'game-pin answer';
-    ap.textContent = '★';
-    new maplibregl.Marker({ element: ap }).setLngLat([q.answer.lng, q.answer.lat]).addTo(map);
+    gameMarkers.push(new maplibregl.Marker({ element: gp }).setLngLat([lng, lat]).addTo(map));
 
-    const line = greatCirclePoints(lat, lng, q.answer.lat, q.answer.lng);
-    map.addSource('gc', { type: 'geojson', data: { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: line } } });
-    map.addLayer({ id: 'gc-line', type: 'line', source: 'gc', paint: { 'line-color': tier.color, 'line-width': 2, 'line-dasharray': [2, 2] } });
-    // Reveal place labels now that the round is locked in.
-    GAME_LABEL_LAYERS.forEach(id => { if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', 'visible'); });
+    const coords = greatCirclePoints(lat, lng, q.answer.lat, q.answer.lng, 96);
+    map.addSource('gc', { type: 'geojson', data: { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: [coords[0], coords[0]] } } });
+    map.addLayer({ id: 'gc-line', type: 'line', source: 'gc', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': tier.color, 'line-width': 2.5 } });
+
+    // Gently ease to frame both points (capped zoom so far guesses don't fling out).
     try {
       const b = new maplibregl.LngLatBounds();
       b.extend([lng, lat]); b.extend([q.answer.lng, q.answer.lat]);
-      map.fitBounds(b, { padding: 70, maxZoom: 5, duration: 800 });
+      const padBottom = Math.round(window.innerHeight * 0.42) + 30;
+      map.fitBounds(b, { padding: { top: 100, bottom: padBottom, left: 70, right: 70 }, maxZoom: 5, duration: 1300, essential: true });
     } catch { /* noop */ }
+
+    animateGameLine(coords, 1300, () => {
+      const ap = document.createElement('div');
+      ap.className = 'game-pin answer';
+      ap.textContent = '★';
+      gameMarkers.push(new maplibregl.Marker({ element: ap }).setLngLat([q.answer.lng, q.answer.lat]).addTo(map));
+    });
 
     const last = gameIdx >= gameRound.length - 1;
     const ptsLabel = mult > 1 ? `${raw} × ${mult} = ${pts}` : `${raw}`;
@@ -956,9 +982,7 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
     const emojis = gameRaw.map(r => scoreTier(r).emoji).join(' ');
     const pct = max ? gameTotal / max : 0;
     const blurb = pct >= 0.95 ? 'Elite. Are you Frank?' : pct >= 0.8 ? 'Sharp memory.' : pct >= 0.6 ? 'Solid round.' : pct >= 0.4 ? 'Not bad — keep practicing.' : 'The globe is big. Try again!';
-    if (gameMap) { gameMap.remove(); gameMap = null; }
-    const container = document.getElementById('gameMap');
-    if (container) container.innerHTML = '';
+    clearGameOverlays();
     const prompt = document.getElementById('gamePrompt');
     if (prompt) prompt.textContent = 'Practice round complete';
     const prog = document.getElementById('gameProgress');
@@ -979,6 +1003,7 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
     const modal = document.getElementById('gameModal');
     if (modal) modal.style.display = 'none';
     document.body.style.overflow = '';
+    clearGameOverlays();
     if (gameMap) { gameMap.remove(); gameMap = null; }
   };
 
@@ -990,8 +1015,6 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
     const panel = document.getElementById('gamePanel');
     const prompt = document.getElementById('gamePrompt');
     const prog = document.getElementById('gameProgress');
-    const container = document.getElementById('gameMap');
-    if (container) container.innerHTML = '';
     if (prompt) prompt.textContent = '';
     if (prog) prog.textContent = '';
     if (panel) panel.innerHTML = '<div class="map-info-loading">Shuffling questions…</div>';
@@ -1003,11 +1026,29 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
       if (panel) panel.innerHTML = '<div class="map-info-loading">No questions cached yet — check back tomorrow.</div>';
       return;
     }
-    gameIdx = 0; gameTotal = 0; gameRaw = [];
+    gameIdx = 0; gameTotal = 0; gameRaw = []; gameLocked = false;
     setGameScore();
+
     await loadMapLibre();
-    startGameQuestion();
+    const maplibregl = (window as any).maplibregl;
+    const container = document.getElementById('gameMap');
+    if (!container) return;
+    clearGameOverlays();
+    if (gameMap) { gameMap.remove(); gameMap = null; }
+    container.innerHTML = '';
+    // Created once per round; questions reuse this same map + camera.
+    const map = new maplibregl.Map({
+      container, style: '/map-style.json', center: [0, 20], zoom: 1,
+      minZoom: -1, maxZoom: 10, projection: { type: 'globe' },
+    });
+    gameMap = map;
+    map.on('load', () => {
+      GAME_HIDE_LAYERS.forEach(id => { if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', 'none'); });
+      map.on('click', (e: any) => handleGameGuess(e.lngLat.lng, e.lngLat.lat));
+      startGameQuestion();
+    });
   };
+
 
   // ── Boot ──────────────────────────────────────────────────────────────────────
 
