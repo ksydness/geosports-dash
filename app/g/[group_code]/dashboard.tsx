@@ -81,6 +81,7 @@ export default function Dashboard({ groupCode, initialData }: Props) {
           <div id="gameToast" className="game-toast" style={{display:'none'}}></div>
         </div>
         <div id="gamePanel" className="game-panel"></div>
+        <div id="gameResults" className="game-results" style={{display:'none'}}></div>
       </div>
 
     </>
@@ -925,6 +926,8 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
     // No map recreation, no camera reset — just clear the previous overlays.
     gameLocked = false;
     clearGameOverlays();
+    const results = document.getElementById('gameResults');
+    if (results) results.style.display = 'none';
     const q = gameRound[gameIdx];
     const prog = document.getElementById('gameProgress');
     const prompt = document.getElementById('gamePrompt');
@@ -1034,20 +1037,19 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
     const pct = totalMax ? gameTotal / totalMax : 0;
     const blurb = pct >= 0.95 ? 'Elite. Are you Frank?' : pct >= 0.8 ? 'Sharp memory.' : pct >= 0.6 ? 'Solid round.' : pct >= 0.4 ? 'Keep practicing.' : 'The globe is big. Try again!';
     clearGameOverlays();
-    const prompt = document.getElementById('gamePrompt');
-    if (prompt) prompt.textContent = '';
-    const prog = document.getElementById('gameProgress');
-    if (prog) prog.textContent = 'Practice round complete';
-    const panel = document.getElementById('gamePanel');
-    if (panel) panel.innerHTML = `
-      <div class="map-info-inner game-final">
-        <div class="game-final-date">Practice round</div>
-        <div class="game-final-score">${gameTotal}<span> / ${totalMax.toLocaleString()}</span></div>
-        <div class="game-final-dots">${dots}</div>
-        <div class="game-bd-list">${rows}</div>
-        <div class="game-final-lbl">${blurb}</div>
-        <button class="game-next-btn" onclick="playAgain()">Play again ↻</button>
-      </div>`;
+    const results = document.getElementById('gameResults');
+    if (results) {
+      results.innerHTML = `
+        <div class="game-results-card">
+          <div class="game-final-date">Practice round complete</div>
+          <div class="game-final-score">${gameTotal}<span> / ${totalMax.toLocaleString()}</span></div>
+          <div class="game-final-dots">${dots}</div>
+          <div class="game-bd-list">${rows}</div>
+          <div class="game-final-lbl">${blurb}</div>
+          <button class="game-next-btn" onclick="playAgain()">Play again ↻</button>
+        </div>`;
+      results.style.display = 'flex';
+    }
   };
 
   (window as any).playAgain = function () { (window as any).openGame(); };
@@ -1056,6 +1058,8 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
     const modal = document.getElementById('gameModal');
     if (modal) modal.style.display = 'none';
     document.body.style.overflow = '';
+    const results = document.getElementById('gameResults');
+    if (results) results.style.display = 'none';
     clearGameOverlays();
     if (gameMap) { gameMap.remove(); gameMap = null; }
   };
@@ -1282,6 +1286,8 @@ const CSS = `
   .game-map-wrap .map-container { position:absolute; inset:0; }
   .game-toast { position:absolute; left:50%; top:54%; transform:translate(-50%,-50%); background:rgba(10,16,26,0.82); padding:8px 18px; border-radius:12px; font-size:16px; font-weight:700; white-space:nowrap; pointer-events:none; box-shadow:0 3px 14px rgba(0,0,0,0.55); z-index:5; }
   .game-panel { flex-shrink:0; background:var(--surface); border-top:1px solid var(--border); max-height:44vh; overflow-y:auto; }
+  .game-results { position:absolute; inset:0; background:var(--bg); display:flex; align-items:center; justify-content:center; padding:20px; z-index:20; overflow-y:auto; }
+  .game-results-card { width:100%; max-width:400px; background:var(--surface); border:1px solid var(--border); border-radius:16px; padding:26px 24px; text-align:center; box-shadow:0 10px 40px rgba(0,0,0,0.5); }
   .game-hint, .game-revealing { padding:16px; text-align:center; color:var(--muted); font-size:13px; }
   .game-pin { width:15px; height:15px; border-radius:50%; background:#3b82f6; border:2px solid #fff; box-shadow:0 1px 5px rgba(0,0,0,0.6); }
   .game-pin.answer { width:18px; height:18px; background:#fff; border:3px solid #22c55e; }
