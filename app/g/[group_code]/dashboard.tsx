@@ -905,7 +905,7 @@ const CSS = `
   .record-val { font-size:18px; font-weight:700; font-variant-numeric:tabular-nums; }
   .record-name { font-size:12px; margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .record-lbl { font-size:10px; color:var(--muted); text-transform:uppercase; letter-spacing:0.06em; margin-top:5px; }
-  .record-card.wooden-spoon { grid-column:1 / -1; background:linear-gradient(135deg, rgba(180,120,40,0.14), rgba(180,120,40,0.05)); border-color:rgba(180,120,40,0.45); }
+  .record-card.wooden-spoon { background:linear-gradient(135deg, rgba(180,120,40,0.14), rgba(180,120,40,0.05)); border-color:rgba(180,120,40,0.45); }
   .record-card.wooden-spoon .record-lbl { color:#b47828; }
   .stats-section-lbl { font-size:11px; font-weight:600; letter-spacing:0.08em; text-transform:uppercase; color:var(--muted); margin-bottom:10px; }
   .stats-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:14px; }
