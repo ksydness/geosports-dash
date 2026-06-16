@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { waitUntil } from '@vercel/functions';
 import { supabase } from '@/lib/supabase';
 import { encrypt } from '@/lib/crypto';
-import { fetchGroupInfo } from '@/lib/geosports';
+import { fetchGroupInfo, extractGroupName } from '@/lib/geosports';
 import { backfillGroup } from '@/lib/sync';
 
 // Backfill takes ~20s — allow up to 60s (Vercel default 10s would kill it mid-run)
@@ -46,17 +46,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: message }, { status: 401 });
   }
 
-  // Extract group name — try several possible field names
-  const raw = groupData as Record<string, unknown>;
-  const groupName =
-    (raw.name as string) ||
-    (raw.groupName as string) ||
-    (raw.group_name as string) ||
-    (raw.title as string) ||
-    (raw.groupTitle as string) ||
-    (raw.group_title as string) ||
-    (raw.label as string) ||
-    code;
+  // Extract group name — current API nests it under `group.name`; falls back to code.
+  const groupName = extractGroupName(groupData) || code;
 
   const encryptedToken = encrypt(token);
 

@@ -29,11 +29,30 @@ export interface GeoScoreEntry {
 }
 
 export interface GeoGroupResponse {
+  // Current API nests group metadata here (restructured ~2026-06-14).
+  group?: { id?: string; name?: string; code?: string; memberCount?: number };
+  // Legacy top-level fields — kept for backward compatibility.
   name?: string;
   groupName?: string;
   group_name?: string;
   leaderboard?: GeoScoreEntry[];
   error?: string;
+}
+
+/**
+ * Pull a human-readable group name from a group response, checking the current
+ * nested shape (`group.name`) first, then falling back through legacy top-level
+ * fields. Returns null if no real name is present (caller can default to the code).
+ */
+export function extractGroupName(data: GeoGroupResponse): string | null {
+  return data.group?.name || data.name || data.groupName || data.group_name || null;
+}
+
+export interface GeoDayResult {
+  /** Group display name from the live API, or null if absent. */
+  groupName: string | null;
+  /** Played leaderboard entries for the date (filtered to valid scores). */
+  played: GeoScoreEntry[];
 }
 
 /** Validate credentials + get group info. Throws if auth fails. */
@@ -53,15 +72,15 @@ export async function fetchGroupInfo(
 }
 
 /**
- * Fetch played scores for a specific date.
+ * Fetch a group's name + played scores for a specific date in one request.
  * Throws AuthError if the session token is rejected (so callers can deactivate the group).
  * Returns null on any other (transient) error.
  */
-export async function fetchDayScores(
+export async function fetchGroupDay(
   groupCode: string,
   sessionToken: string,
   date: string
-): Promise<GeoScoreEntry[] | null> {
+): Promise<GeoDayResult | null> {
   let res: Response;
   try {
     res = await fetch(`${BASE}/api/groups/${groupCode}?date=${date}`, {
@@ -80,7 +99,23 @@ export async function fetchDayScores(
   }
   if (data.error === 'Not authenticated' || data.error === 'Invalid session') throw new AuthError();
   if (data.error) return null;
-  return (data.leaderboard || []).filter(e => e.userId && e.score !== null && e.score !== undefined);
+  return {
+    groupName: extractGroupName(data),
+    played: (data.leaderboard || []).filter(e => e.userId && e.score !== null && e.score !== undefined),
+  };
+}
+
+/**
+ * Fetch played scores for a specific date. Thin wrapper over fetchGroupDay for
+ * callers that don't need the group name (e.g. backfill). Propagates AuthError.
+ */
+export async function fetchDayScores(
+  groupCode: string,
+  sessionToken: string,
+  date: string
+): Promise<GeoScoreEntry[] | null> {
+  const r = await fetchGroupDay(groupCode, sessionToken, date);
+  return r ? r.played : null;
 }
 
 /** Proxy the public questions endpoint (no auth needed). */

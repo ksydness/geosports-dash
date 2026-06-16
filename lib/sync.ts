@@ -1,6 +1,6 @@
 import { supabase } from './supabase';
 import { decrypt } from './crypto';
-import { fetchDayScores, AuthError, GeoScoreEntry } from './geosports';
+import { fetchDayScores, fetchGroupDay, AuthError, GeoScoreEntry } from './geosports';
 import { todayET, etDateMinusDays } from './dates';
 
 /** Upsert one day's scores for a group. */
@@ -95,12 +95,19 @@ export async function backfillGroup(
 export async function syncGroup(groupCode: string, encryptedToken: string): Promise<number> {
   const token = decrypt(encryptedToken);
   let synced = 0;
+  let liveName: string | null = null;
   try {
     for (const date of [todayET(), etDateMinusDays(1)]) {
-      const played = await fetchDayScores(groupCode, token, date);
-      if (played && played.length > 0) {
-        await upsertDayScores(groupCode, date, played);
-        synced += played.length;
+      // Use fetchGroupDay on the first (today) request so we can also refresh the
+      // stored group name — groups registered before the name fix have the code
+      // saved as their name; this self-heals them on the next sync.
+      const day = await fetchGroupDay(groupCode, token, date);
+      if (day) {
+        if (liveName === null && day.groupName) liveName = day.groupName;
+        if (day.played.length > 0) {
+          await upsertDayScores(groupCode, date, day.played);
+          synced += day.played.length;
+        }
       }
     }
   } catch (err) {
@@ -109,9 +116,11 @@ export async function syncGroup(groupCode: string, encryptedToken: string): Prom
     }
     throw err;
   }
-  await supabase
-    .from('groups')
-    .update({ last_synced_at: new Date().toISOString() })
-    .eq('group_code', groupCode);
+  const update: { last_synced_at: string; group_name?: string } = {
+    last_synced_at: new Date().toISOString(),
+  };
+  // Only overwrite the name when the API gave us a real one that differs from the code.
+  if (liveName && liveName !== groupCode) update.group_name = liveName;
+  await supabase.from('groups').update(update).eq('group_code', groupCode);
   return synced;
 }
