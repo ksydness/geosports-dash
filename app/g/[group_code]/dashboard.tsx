@@ -875,7 +875,7 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
 
   function setGameScore() {
     const s = document.getElementById('gameScore');
-    if (s) s.textContent = String(gameTotal);
+    if (s) s.textContent = String(gameTotal).padStart(3, '0');
   }
 
   function clearGameOverlays() {
@@ -883,8 +883,8 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
     gameMarkers.forEach(m => m.remove());
     gameMarkers = [];
     if (!gameMap) return;
-    if (gameMap.getLayer('gc-line')) gameMap.removeLayer('gc-line');
-    if (gameMap.getSource('gc')) gameMap.removeSource('gc');
+    ['gc-line', 'region-fill', 'region-line'].forEach(id => { if (gameMap.getLayer(id)) gameMap.removeLayer(id); });
+    ['gc', 'answer-region'].forEach(id => { if (gameMap.getSource(id)) gameMap.removeSource(id); });
   }
 
   function startGameQuestion() {
@@ -939,6 +939,14 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
     gp.className = 'game-pin guess';
     gameMarkers.push(new maplibregl.Marker({ element: gp }).setLngLat([lng, lat]).addTo(map));
 
+    // Highlight the answer's US state in green (skipped for non-US answers).
+    const region = usStatesGeo ? stateFeatureAt(q.answer.lng, q.answer.lat, usStatesGeo) : null;
+    if (region) {
+      map.addSource('answer-region', { type: 'geojson', data: region });
+      map.addLayer({ id: 'region-fill', type: 'fill', source: 'answer-region', paint: { 'fill-color': '#22c55e', 'fill-opacity': 0.18 } });
+      map.addLayer({ id: 'region-line', type: 'line', source: 'answer-region', paint: { 'line-color': '#22c55e', 'line-width': 1.5, 'line-opacity': 0.85 } });
+    }
+
     const coords = greatCirclePoints(lat, lng, q.answer.lat, q.answer.lng, 96);
     map.addSource('gc', { type: 'geojson', data: { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: [coords[0], coords[0]] } } });
     map.addLayer({ id: 'gc-line', type: 'line', source: 'gc', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': tier.color, 'line-width': 2.5 } });
@@ -954,7 +962,6 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
     animateGameLine(coords, 1300, () => {
       const ap = document.createElement('div');
       ap.className = 'game-pin answer';
-      ap.textContent = '★';
       gameMarkers.push(new maplibregl.Marker({ element: ap }).setLngLat([q.answer.lng, q.answer.lat]).addTo(map));
     });
 
@@ -1030,6 +1037,7 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
     setGameScore();
 
     await loadMapLibre();
+    await loadUsStates();
     const maplibregl = (window as any).maplibregl;
     const container = document.getElementById('gameMap');
     if (!container) return;
@@ -1038,7 +1046,7 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
     container.innerHTML = '';
     // Created once per round; questions reuse this same map + camera.
     const map = new maplibregl.Map({
-      container, style: '/map-style.json', center: [-96, 40], zoom: 2.2,
+      container, style: '/map-style.json', center: [-96, 40], zoom: 2.4,
       minZoom: -1, maxZoom: 10, projection: { type: 'globe' },
     });
     gameMap = map;
@@ -1056,6 +1064,36 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
 }
 
 // ─── CSS ──────────────────────────────────────────────────────────────────────
+
+// US state polygons for the practice game's green answer-region highlight.
+let usStatesGeo: any = null;
+async function loadUsStates(): Promise<any> {
+  if (usStatesGeo) return usStatesGeo;
+  try { usStatesGeo = await fetch('/us-states.geojson').then(r => r.json()); }
+  catch { usStatesGeo = { features: [] }; }
+  return usStatesGeo;
+}
+function pointInRing(lng: number, lat: number, ring: number[][]): boolean {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const xi = ring[i][0], yi = ring[i][1], xj = ring[j][0], yj = ring[j][1];
+    if (((yi > lat) !== (yj > lat)) && (lng < ((xj - xi) * (lat - yi)) / (yj - yi) + xi)) inside = !inside;
+  }
+  return inside;
+}
+function pointInPolygon(lng: number, lat: number, poly: number[][][]): boolean {
+  if (!pointInRing(lng, lat, poly[0])) return false;
+  for (let k = 1; k < poly.length; k++) if (pointInRing(lng, lat, poly[k])) return false;
+  return true;
+}
+function stateFeatureAt(lng: number, lat: number, fc: any): any {
+  for (const f of fc.features || []) {
+    const g = f.geometry;
+    if (g.type === 'Polygon') { if (pointInPolygon(lng, lat, g.coordinates)) return f; }
+    else if (g.type === 'MultiPolygon') { for (const poly of g.coordinates) if (pointInPolygon(lng, lat, poly)) return f; }
+  }
+  return null;
+}
 
 const CSS = `
   :root {
@@ -1194,8 +1232,8 @@ const CSS = `
   .game-prompt { padding:12px 16px; font-size:14px; line-height:1.5; background:var(--surface); border-bottom:1px solid var(--border); flex-shrink:0; min-height:20px; }
   .game-panel { flex-shrink:0; background:var(--surface); border-top:1px solid var(--border); max-height:42vh; overflow-y:auto; }
   .game-hint { padding:16px; text-align:center; color:var(--muted); font-size:13px; }
-  .game-pin { width:16px; height:16px; border-radius:50%; background:#fff; border:2px solid var(--accent); box-shadow:0 1px 4px rgba(0,0,0,0.6); }
-  .game-pin.answer { width:24px; height:24px; border-radius:50%; background:var(--green); border:2px solid #fff; color:#06310f; display:flex; align-items:center; justify-content:center; font-size:13px; font-weight:700; }
+  .game-pin { width:15px; height:15px; border-radius:50%; background:#3b82f6; border:2px solid #fff; box-shadow:0 1px 5px rgba(0,0,0,0.6); }
+  .game-pin.answer { width:18px; height:18px; background:#fff; border:3px solid #22c55e; }
   .game-result-line { display:flex; align-items:center; gap:8px; margin-bottom:10px; flex-wrap:wrap; }
   .game-dot { width:14px; height:14px; border-radius:50%; flex-shrink:0; }
   .game-result-pts { font-size:15px; font-weight:700; }
