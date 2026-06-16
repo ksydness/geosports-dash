@@ -68,15 +68,21 @@ export default function Dashboard({ groupCode, initialData }: Props) {
         <div className="game-bar">
           <div className="game-score-box">
             <div className="game-score-lbl">SCORE</div>
-            <div id="gameScore" className="game-score-val">0</div>
+            <div id="gameScore" className="game-score-val">000</div>
           </div>
-          <span id="gameProgress" className="game-progress"></span>
-          <button className="map-modal-close" onClick={() => (window as any).closeGame()}>✕</button>
+          <div className="game-head">
+            <div id="gameProgress" className="game-progress"></div>
+            <div id="gamePrompt" className="game-prompt"></div>
+          </div>
+          <button className="game-close" onClick={() => (window as any).closeGame()}>✕</button>
         </div>
-        <div id="gamePrompt" className="game-prompt"></div>
-        <div id="gameMap" className="map-container"></div>
+        <div className="game-map-wrap">
+          <div id="gameMap" className="map-container"></div>
+          <div id="gameToast" className="game-toast" style={{display:'none'}}></div>
+        </div>
         <div id="gamePanel" className="game-panel"></div>
       </div>
+
     </>
   );
 }
@@ -859,9 +865,9 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
 
 
   // ── Secret practice game (triggered by the globe icon) ──────────────────────
-  // One persistent globe for the whole round: on reveal we ease to frame the
-  // guess + answer and draw the arc slowly; the next question keeps that exact
-  // camera and just clears the previous pins/line (matches GeoSports' feel).
+  // One persistent globe for the round: reveal eases to frame guess + answer,
+  // draws the arc slowly, then the next question keeps that camera. Cities stay
+  // hidden the whole time. Scoring is replicated locally from the live curve.
   let gameRound: any[] = [];
   let gameIdx = 0;
   let gameTotal = 0;
@@ -870,18 +876,46 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
   let gameLocked = false;
   let gameMarkers: any[] = [];
   let gameAnimId = 0;
-  // City/town labels stay hidden the whole game so answers are never spelled out.
+  let gameScoreAnimId = 0;
   const GAME_HIDE_LAYERS = ['label-city', 'label-town'];
+  // Original quips (not GeoSports' copy), keyed loosely to score tier.
+  const GAME_QUIPS: Record<string, string[]> = {
+    perfect: ['Bullseye.', 'Nailed it.', 'Pinpoint.'],
+    great: ['Razor sharp.', 'So close.', 'Basically perfect.'],
+    good: ['In the ballpark.', 'Not bad at all.', 'Respectable tap.'],
+    poor: ['Way off.', 'The globe is big.', 'Wrong neighborhood.', 'Not even close.'],
+    zero: ['Other side of the planet.', 'Wrong hemisphere entirely.'],
+  };
+  function quipFor(raw: number): string {
+    const k = raw >= 100 ? 'perfect' : raw >= 90 ? 'great' : raw >= 50 ? 'good' : raw >= 1 ? 'poor' : 'zero';
+    const arr = GAME_QUIPS[k];
+    return arr[Math.floor(Math.random() * arr.length)];
+  }
 
   function setGameScore() {
     const s = document.getElementById('gameScore');
     if (s) s.textContent = String(gameTotal).padStart(3, '0');
   }
+  function animateGameScore(from: number, to: number) {
+    if (gameScoreAnimId) cancelAnimationFrame(gameScoreAnimId);
+    const el = document.getElementById('gameScore');
+    if (!el) return;
+    const start = performance.now(), dur = 600;
+    const step = (now: number) => {
+      const t = Math.min(1, (now - start) / dur);
+      el.textContent = String(Math.round(from + (to - from) * t)).padStart(3, '0');
+      if (t < 1) gameScoreAnimId = requestAnimationFrame(step); else gameScoreAnimId = 0;
+    };
+    gameScoreAnimId = requestAnimationFrame(step);
+  }
 
   function clearGameOverlays() {
     if (gameAnimId) { cancelAnimationFrame(gameAnimId); gameAnimId = 0; }
+    if (gameScoreAnimId) { cancelAnimationFrame(gameScoreAnimId); gameScoreAnimId = 0; }
     gameMarkers.forEach(m => m.remove());
     gameMarkers = [];
+    const toast = document.getElementById('gameToast');
+    if (toast) { toast.style.display = 'none'; toast.textContent = ''; }
     if (!gameMap) return;
     ['gc-line', 'region-fill', 'region-line'].forEach(id => { if (gameMap.getLayer(id)) gameMap.removeLayer(id); });
     ['gc', 'answer-region'].forEach(id => { if (gameMap.getSource(id)) gameMap.removeSource(id); });
@@ -902,19 +936,15 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
 
   function animateGameLine(coords: number[][], durationMs: number, onDone: () => void) {
     const src = gameMap.getSource('gc');
-    if (!src) return;
+    if (!src) { onDone(); return; }
     const start = performance.now();
     const step = (now: number) => {
       const t = Math.min(1, (now - start) / durationMs);
-      const ease = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2; // easeInOutQuad
+      const ease = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
       const count = Math.max(2, Math.floor(ease * (coords.length - 1)) + 1);
       src.setData({ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: coords.slice(0, count) } });
-      if (t < 1) {
-        gameAnimId = requestAnimationFrame(step);
-      } else {
-        gameAnimId = 0;
-        onDone();
-      }
+      if (t < 1) gameAnimId = requestAnimationFrame(step);
+      else { gameAnimId = 0; onDone(); }
     };
     gameAnimId = requestAnimationFrame(step);
   }
@@ -930,11 +960,11 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
     const mult = q.multiplier || 1;
     const pts = raw * mult;
     const tier = scoreTier(raw);
+    const lineColor = raw >= 50 ? '#22c55e' : '#ef4444';
+    const prevTotal = gameTotal;
     gameRaw.push(raw);
     gameTotal += pts;
-    setGameScore();
 
-    // Guess pin now; answer pin drops once the arc finishes drawing.
     const gp = document.createElement('div');
     gp.className = 'game-pin guess';
     gameMarkers.push(new maplibregl.Marker({ element: gp }).setLngLat([lng, lat]).addTo(map));
@@ -949,56 +979,72 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
 
     const coords = greatCirclePoints(lat, lng, q.answer.lat, q.answer.lng, 96);
     map.addSource('gc', { type: 'geojson', data: { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: [coords[0], coords[0]] } } });
-    map.addLayer({ id: 'gc-line', type: 'line', source: 'gc', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': tier.color, 'line-width': 2.5 } });
+    map.addLayer({ id: 'gc-line', type: 'line', source: 'gc', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': lineColor, 'line-width': 2.5 } });
 
-    // Gently ease to frame both points (capped zoom so far guesses don't fling out).
     try {
       const b = new maplibregl.LngLatBounds();
       b.extend([lng, lat]); b.extend([q.answer.lng, q.answer.lat]);
-      const padBottom = Math.round(window.innerHeight * 0.42) + 30;
-      map.fitBounds(b, { padding: { top: 100, bottom: padBottom, left: 70, right: 70 }, maxZoom: 5, duration: 1300, essential: true });
+      const padBottom = Math.round(window.innerHeight * 0.44) + 30;
+      map.fitBounds(b, { padding: { top: 90, bottom: padBottom, left: 70, right: 70 }, maxZoom: 5, duration: 1300, essential: true });
     } catch { /* noop */ }
+
+    const panel = document.getElementById('gamePanel');
+    if (panel) panel.innerHTML = '<div class="game-revealing">Revealing…</div>';
 
     animateGameLine(coords, 1300, () => {
       const ap = document.createElement('div');
       ap.className = 'game-pin answer';
       gameMarkers.push(new maplibregl.Marker({ element: ap }).setLngLat([q.answer.lng, q.answer.lat]).addTo(map));
-    });
 
-    const last = gameIdx >= gameRound.length - 1;
-    const ptsLabel = mult > 1 ? `${raw} × ${mult} = ${pts}` : `${raw}`;
-    const glow = raw >= 100 ? `box-shadow:0 0 10px ${tier.color};` : '';
-    const panel = document.getElementById('gamePanel');
-    if (panel) panel.innerHTML = `
-      <div class="map-info-inner">
-        <div class="game-result-line">
-          <span class="game-dot" style="background:${tier.color};${glow}"></span>
-          <span class="game-result-pts" style="color:${tier.color}">${tier.emoji} ${ptsLabel} pts</span>
-          <span class="game-result-dist">${Math.round(miles).toLocaleString()} mi off</span>
-        </div>
-        <div class="map-info-answer">📍 ${esc(q.answer.name)}</div>
-        ${q.answer.story ? `<div class="map-info-story">${esc(q.answer.story)}</div>` : ''}
-        <button class="game-next-btn" onclick="${last ? 'gameFinish()' : 'gameNext()'}">${last ? 'See results →' : 'Next question →'}</button>
-      </div>`;
+      const toast = document.getElementById('gameToast');
+      if (toast) { toast.textContent = quipFor(raw); toast.style.color = tier.color; toast.style.display = 'block'; }
+
+      animateGameScore(prevTotal, gameTotal);
+
+      const last = gameIdx >= gameRound.length - 1;
+      const ptsLabel = mult > 1 ? `${raw} (×${mult}) = ${pts}` : `${raw}`;
+      const glow = raw >= 100 ? `box-shadow:0 0 10px ${tier.color};` : '';
+      if (panel) panel.innerHTML = `
+        <div class="map-info-inner">
+          <div class="game-result-line">
+            <span class="game-dot" style="background:${tier.color};${glow}"></span>
+            <span class="game-result-pts" style="color:${tier.color}">${tier.emoji} ${ptsLabel} pts</span>
+            <span class="game-result-dist">${Math.round(miles).toLocaleString()} mi off</span>
+          </div>
+          <div class="map-info-answer">📍 ${esc(q.answer.name)}</div>
+          ${q.answer.story ? `<div class="map-info-story">${esc(q.answer.story)}</div>` : ''}
+          <button class="game-next-btn" onclick="${last ? 'gameFinish()' : 'gameNext()'}">${last ? 'See results →' : 'Next question →'}</button>
+        </div>`;
+    });
   }
 
   (window as any).gameNext = function () { gameIdx++; startGameQuestion(); };
 
   (window as any).gameFinish = function () {
-    const max = gameRound.reduce((s, q) => s + 100 * (q.multiplier || 1), 0);
-    const emojis = gameRaw.map(r => scoreTier(r).emoji).join(' ');
-    const pct = max ? gameTotal / max : 0;
-    const blurb = pct >= 0.95 ? 'Elite. Are you Frank?' : pct >= 0.8 ? 'Sharp memory.' : pct >= 0.6 ? 'Solid round.' : pct >= 0.4 ? 'Not bad — keep practicing.' : 'The globe is big. Try again!';
+    const maxes = gameRound.map(q => 100 * (q.multiplier || 1));
+    const totalMax = maxes.reduce((a, b) => a + b, 0);
+    const dots = gameRaw.map(r => `<span class="d" style="background:${scoreTier(r).color}"></span>`).join('');
+    const rows = gameRaw.map((r, i) => {
+      const m = gameRound[i].multiplier || 1;
+      const pts = r * m;
+      const t = scoreTier(r);
+      const pct = Math.max(2, Math.round((pts / maxes[i]) * 100));
+      return `<div class="game-bd-row"><span class="game-bd-label">Q${i + 1}</span><div class="game-bd-track"><div class="game-bd-fill" style="width:${pct}%;background:${t.color}"></div></div><span class="game-bd-pts">${pts}</span></div>`;
+    }).join('');
+    const pct = totalMax ? gameTotal / totalMax : 0;
+    const blurb = pct >= 0.95 ? 'Elite. Are you Frank?' : pct >= 0.8 ? 'Sharp memory.' : pct >= 0.6 ? 'Solid round.' : pct >= 0.4 ? 'Keep practicing.' : 'The globe is big. Try again!';
     clearGameOverlays();
     const prompt = document.getElementById('gamePrompt');
-    if (prompt) prompt.textContent = 'Practice round complete';
+    if (prompt) prompt.textContent = '';
     const prog = document.getElementById('gameProgress');
-    if (prog) prog.textContent = 'Results';
+    if (prog) prog.textContent = 'Practice round complete';
     const panel = document.getElementById('gamePanel');
     if (panel) panel.innerHTML = `
       <div class="map-info-inner game-final">
-        <div class="game-final-emojis">${emojis}</div>
-        <div class="game-final-score">${gameTotal}<span> / ${max}</span></div>
+        <div class="game-final-date">Practice round</div>
+        <div class="game-final-score">${gameTotal}<span> / ${totalMax.toLocaleString()}</span></div>
+        <div class="game-final-dots">${dots}</div>
+        <div class="game-bd-list">${rows}</div>
         <div class="game-final-lbl">${blurb}</div>
         <button class="game-next-btn" onclick="playAgain()">Play again ↻</button>
       </div>`;
@@ -1044,7 +1090,6 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
     clearGameOverlays();
     if (gameMap) { gameMap.remove(); gameMap = null; }
     container.innerHTML = '';
-    // Created once per round; questions reuse this same map + camera.
     const map = new maplibregl.Map({
       container, style: '/map-style.json', center: [-96, 40], zoom: 2.4,
       minZoom: -1, maxZoom: 10, projection: { type: 'globe' },
@@ -1224,14 +1269,20 @@ const CSS = `
   /* ── Secret practice game ── */
   .header-logo { cursor:pointer; user-select:none; -webkit-tap-highlight-color:transparent; }
   .game-modal { position:fixed; inset:0; z-index:1100; background:var(--bg); display:flex; flex-direction:column; }
-  .game-bar { display:flex; align-items:center; gap:12px; padding:10px 14px; background:var(--surface); border-bottom:1px solid var(--border); flex-shrink:0; }
-  .game-score-box { border:1px solid var(--accent); border-radius:8px; padding:4px 10px; text-align:center; min-width:62px; }
+  .game-bar { display:flex; align-items:stretch; gap:10px; padding:10px 12px; background:var(--surface); border-bottom:1px solid var(--border); flex-shrink:0; }
+  .game-score-box { border:1px solid var(--accent); border-radius:8px; padding:4px 10px; text-align:center; min-width:64px; align-self:center; flex-shrink:0; }
   .game-score-lbl { font-size:8px; letter-spacing:0.12em; color:var(--accent); font-weight:700; }
   .game-score-val { font-size:18px; font-weight:700; font-variant-numeric:tabular-nums; font-family:ui-monospace,Menlo,monospace; }
-  .game-progress { flex:1; text-align:center; font-size:12px; font-weight:600; letter-spacing:0.06em; color:var(--muted); text-transform:uppercase; }
-  .game-prompt { padding:12px 16px; font-size:14px; line-height:1.5; background:var(--surface); border-bottom:1px solid var(--border); flex-shrink:0; min-height:20px; }
-  .game-panel { flex-shrink:0; background:var(--surface); border-top:1px solid var(--border); max-height:42vh; overflow-y:auto; }
-  .game-hint { padding:16px; text-align:center; color:var(--muted); font-size:13px; }
+  .game-head { flex:1; min-width:0; display:flex; flex-direction:column; }
+  .game-progress { background:#b9f0d6; color:#0a3a24; text-align:center; font-size:11px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; padding:5px 8px; border-radius:6px; min-height:23px; }
+  .game-prompt { font-size:13px; line-height:1.45; color:var(--text); padding:8px 4px 2px; }
+  .game-close { background:none; border:none; color:var(--muted); font-size:20px; cursor:pointer; line-height:1; align-self:center; padding:0 2px; transition:color 0.15s; flex-shrink:0; }
+  .game-close:hover { color:var(--text); }
+  .game-map-wrap { position:relative; flex:1; min-height:0; }
+  .game-map-wrap .map-container { position:absolute; inset:0; }
+  .game-toast { position:absolute; left:50%; top:54%; transform:translate(-50%,-50%); background:rgba(10,16,26,0.82); padding:8px 18px; border-radius:12px; font-size:16px; font-weight:700; white-space:nowrap; pointer-events:none; box-shadow:0 3px 14px rgba(0,0,0,0.55); z-index:5; }
+  .game-panel { flex-shrink:0; background:var(--surface); border-top:1px solid var(--border); max-height:44vh; overflow-y:auto; }
+  .game-hint, .game-revealing { padding:16px; text-align:center; color:var(--muted); font-size:13px; }
   .game-pin { width:15px; height:15px; border-radius:50%; background:#3b82f6; border:2px solid #fff; box-shadow:0 1px 5px rgba(0,0,0,0.6); }
   .game-pin.answer { width:18px; height:18px; background:#fff; border:3px solid #22c55e; }
   .game-result-line { display:flex; align-items:center; gap:8px; margin-bottom:10px; flex-wrap:wrap; }
@@ -1241,8 +1292,16 @@ const CSS = `
   .game-next-btn { display:block; width:100%; margin-top:14px; background:var(--accent); border:none; border-radius:10px; color:#fff; font-size:14px; font-weight:700; padding:12px; cursor:pointer; transition:opacity 0.15s; }
   .game-next-btn:hover { opacity:0.9; }
   .game-final { text-align:center; }
-  .game-final-emojis { font-size:22px; letter-spacing:4px; margin-bottom:10px; }
+  .game-final-date { font-size:11px; letter-spacing:0.08em; text-transform:uppercase; color:var(--muted); margin-bottom:6px; }
   .game-final-score { font-size:34px; font-weight:800; font-variant-numeric:tabular-nums; }
   .game-final-score span { font-size:18px; color:var(--muted); font-weight:600; }
-  .game-final-lbl { font-size:13px; color:var(--muted); margin-top:4px; }
+  .game-final-dots { display:flex; justify-content:center; gap:7px; margin:12px 0 16px; }
+  .game-final-dots .d { width:18px; height:18px; border-radius:50%; }
+  .game-bd-list { margin-bottom:6px; }
+  .game-bd-row { display:flex; align-items:center; gap:10px; margin-bottom:8px; }
+  .game-bd-label { width:26px; font-size:11px; font-weight:700; color:var(--muted); text-align:left; flex-shrink:0; }
+  .game-bd-track { flex:1; height:18px; background:rgba(255,255,255,0.06); border-radius:5px; overflow:hidden; }
+  .game-bd-fill { height:100%; border-radius:5px; transition:width 0.5s ease; }
+  .game-bd-pts { width:42px; text-align:right; font-size:13px; font-weight:700; font-variant-numeric:tabular-nums; flex-shrink:0; }
+  .game-final-lbl { font-size:13px; color:var(--muted); margin-top:6px; }
 `;
