@@ -1040,6 +1040,7 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
     const results = document.getElementById('gameResults');
     if (results) {
       results.innerHTML = `
+        <button class="game-results-close" onclick="closeGame()" aria-label="Close">✕</button>
         <div class="game-results-card">
           <div class="game-final-date">Practice round complete</div>
           <div class="game-final-score">${gameTotal}<span> / ${totalMax.toLocaleString()}</span></div>
@@ -1288,6 +1289,8 @@ const CSS = `
   .game-panel { flex-shrink:0; background:var(--surface); border-top:1px solid var(--border); max-height:44vh; overflow-y:auto; }
   .game-results { position:absolute; inset:0; background:var(--bg); display:flex; align-items:center; justify-content:center; padding:20px; z-index:20; overflow-y:auto; }
   .game-results-card { width:100%; max-width:400px; background:var(--surface); border:1px solid var(--border); border-radius:16px; padding:26px 24px; text-align:center; box-shadow:0 10px 40px rgba(0,0,0,0.5); }
+  .game-results-close { position:absolute; top:16px; right:18px; background:none; border:none; color:var(--muted); font-size:24px; line-height:1; cursor:pointer; padding:4px; transition:color 0.15s; }
+  .game-results-close:hover { color:var(--text); }
   .game-hint, .game-revealing { padding:16px; text-align:center; color:var(--muted); font-size:13px; }
   .game-pin { width:15px; height:15px; border-radius:50%; background:#3b82f6; border:2px solid #fff; box-shadow:0 1px 5px rgba(0,0,0,0.6); }
   .game-pin.answer { width:18px; height:18px; background:#fff; border:3px solid #22c55e; }
