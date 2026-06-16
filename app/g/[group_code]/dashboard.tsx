@@ -1038,7 +1038,7 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
     container.innerHTML = '';
     // Created once per round; questions reuse this same map + camera.
     const map = new maplibregl.Map({
-      container, style: '/map-style.json', center: [0, 20], zoom: 1,
+      container, style: '/map-style.json', center: [-96, 40], zoom: 2.2,
       minZoom: -1, maxZoom: 10, projection: { type: 'globe' },
     });
     gameMap = map;
