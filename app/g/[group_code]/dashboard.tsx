@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
+import { milesToRawScore, haversineMiles, scoreTier, greatCirclePoints } from '@/lib/scoring';
 
 interface ScoreEntry {
   date: string;
@@ -35,7 +36,7 @@ export default function Dashboard({ groupCode, initialData }: Props) {
       <style>{CSS}</style>
       <div id="app">
         <div className="header">
-          <div className="header-logo">🌍</div>
+          <div className="header-logo" onClick={() => (window as any).openGame && (window as any).openGame()}>🌍</div>
           <h1 id="groupTitle">Loading…</h1>
           <p>GeoSports Dashboard</p>
         </div>
@@ -60,6 +61,21 @@ export default function Dashboard({ groupCode, initialData }: Props) {
         </div>
         <div id="mapContainer" className="map-container"></div>
         <div id="mapInfoPanel" className="map-info-panel"></div>
+      </div>
+
+      {/* Secret practice game (globe-icon easter egg) */}
+      <div id="gameModal" className="game-modal" style={{display:'none'}}>
+        <div className="game-bar">
+          <div className="game-score-box">
+            <div className="game-score-lbl">SCORE</div>
+            <div id="gameScore" className="game-score-val">0</div>
+          </div>
+          <span id="gameProgress" className="game-progress"></span>
+          <button className="map-modal-close" onClick={() => (window as any).closeGame()}>✕</button>
+        </div>
+        <div id="gamePrompt" className="game-prompt"></div>
+        <div id="gameMap" className="map-container"></div>
+        <div id="gamePanel" className="game-panel"></div>
       </div>
     </>
   );
@@ -841,6 +857,158 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
     if (mapInstance) { mapInstance.remove(); mapInstance = null; }
   };
 
+
+  // ── Secret practice game (triggered by the globe icon) ──────────────────────
+  let gameRound: any[] = [];
+  let gameIdx = 0;
+  let gameTotal = 0;
+  let gameRaw: number[] = [];
+  let gameMap: any = null;
+  let gameLocked = false;
+  const GAME_LABEL_LAYERS = ['label-city', 'label-town'];
+
+  function setGameScore() {
+    const s = document.getElementById('gameScore');
+    if (s) s.textContent = String(gameTotal);
+  }
+
+  function startGameQuestion() {
+    gameLocked = false;
+    const q = gameRound[gameIdx];
+    const prog = document.getElementById('gameProgress');
+    const prompt = document.getElementById('gamePrompt');
+    const panel = document.getElementById('gamePanel');
+    const container = document.getElementById('gameMap');
+    if (prog) prog.textContent = `Question ${gameIdx + 1} of ${gameRound.length}`;
+    if (prompt) prompt.textContent = q.prompt;
+    if (panel) panel.innerHTML = '<div class="game-hint">Tap the globe where you think the answer is</div>';
+    if (!container) return;
+    const maplibregl = (window as any).maplibregl;
+    if (gameMap) { gameMap.remove(); gameMap = null; }
+    container.innerHTML = '';
+    const map = new maplibregl.Map({
+      container, style: '/map-style.json', center: [0, 20], zoom: 1,
+      minZoom: -1, maxZoom: 10, projection: { type: 'globe' },
+    });
+    gameMap = map;
+    map.on('load', () => {
+      // Hide place-name labels so the answer city isn't given away.
+      GAME_LABEL_LAYERS.forEach(id => { if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', 'none'); });
+      map.on('click', (e: any) => handleGameGuess(e.lngLat.lng, e.lngLat.lat));
+    });
+  }
+
+  function handleGameGuess(lng: number, lat: number) {
+    if (gameLocked || !gameMap) return;
+    gameLocked = true;
+    const maplibregl = (window as any).maplibregl;
+    const map = gameMap;
+    const q = gameRound[gameIdx];
+    const miles = haversineMiles(lat, lng, q.answer.lat, q.answer.lng);
+    const raw = milesToRawScore(miles);
+    const mult = q.multiplier || 1;
+    const pts = raw * mult;
+    const tier = scoreTier(raw);
+    gameRaw.push(raw);
+    gameTotal += pts;
+    setGameScore();
+
+    const gp = document.createElement('div');
+    gp.className = 'game-pin guess';
+    new maplibregl.Marker({ element: gp }).setLngLat([lng, lat]).addTo(map);
+    const ap = document.createElement('div');
+    ap.className = 'game-pin answer';
+    ap.textContent = '★';
+    new maplibregl.Marker({ element: ap }).setLngLat([q.answer.lng, q.answer.lat]).addTo(map);
+
+    const line = greatCirclePoints(lat, lng, q.answer.lat, q.answer.lng);
+    map.addSource('gc', { type: 'geojson', data: { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: line } } });
+    map.addLayer({ id: 'gc-line', type: 'line', source: 'gc', paint: { 'line-color': tier.color, 'line-width': 2, 'line-dasharray': [2, 2] } });
+    // Reveal place labels now that the round is locked in.
+    GAME_LABEL_LAYERS.forEach(id => { if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', 'visible'); });
+    try {
+      const b = new maplibregl.LngLatBounds();
+      b.extend([lng, lat]); b.extend([q.answer.lng, q.answer.lat]);
+      map.fitBounds(b, { padding: 70, maxZoom: 5, duration: 800 });
+    } catch { /* noop */ }
+
+    const last = gameIdx >= gameRound.length - 1;
+    const ptsLabel = mult > 1 ? `${raw} × ${mult} = ${pts}` : `${raw}`;
+    const glow = raw >= 100 ? `box-shadow:0 0 10px ${tier.color};` : '';
+    const panel = document.getElementById('gamePanel');
+    if (panel) panel.innerHTML = `
+      <div class="map-info-inner">
+        <div class="game-result-line">
+          <span class="game-dot" style="background:${tier.color};${glow}"></span>
+          <span class="game-result-pts" style="color:${tier.color}">${tier.emoji} ${ptsLabel} pts</span>
+          <span class="game-result-dist">${Math.round(miles).toLocaleString()} mi off</span>
+        </div>
+        <div class="map-info-answer">📍 ${esc(q.answer.name)}</div>
+        ${q.answer.story ? `<div class="map-info-story">${esc(q.answer.story)}</div>` : ''}
+        <button class="game-next-btn" onclick="${last ? 'gameFinish()' : 'gameNext()'}">${last ? 'See results →' : 'Next question →'}</button>
+      </div>`;
+  }
+
+  (window as any).gameNext = function () { gameIdx++; startGameQuestion(); };
+
+  (window as any).gameFinish = function () {
+    const max = gameRound.reduce((s, q) => s + 100 * (q.multiplier || 1), 0);
+    const emojis = gameRaw.map(r => scoreTier(r).emoji).join(' ');
+    const pct = max ? gameTotal / max : 0;
+    const blurb = pct >= 0.95 ? 'Elite. Are you Frank?' : pct >= 0.8 ? 'Sharp memory.' : pct >= 0.6 ? 'Solid round.' : pct >= 0.4 ? 'Not bad — keep practicing.' : 'The globe is big. Try again!';
+    if (gameMap) { gameMap.remove(); gameMap = null; }
+    const container = document.getElementById('gameMap');
+    if (container) container.innerHTML = '';
+    const prompt = document.getElementById('gamePrompt');
+    if (prompt) prompt.textContent = 'Practice round complete';
+    const prog = document.getElementById('gameProgress');
+    if (prog) prog.textContent = 'Results';
+    const panel = document.getElementById('gamePanel');
+    if (panel) panel.innerHTML = `
+      <div class="map-info-inner game-final">
+        <div class="game-final-emojis">${emojis}</div>
+        <div class="game-final-score">${gameTotal}<span> / ${max}</span></div>
+        <div class="game-final-lbl">${blurb}</div>
+        <button class="game-next-btn" onclick="playAgain()">Play again ↻</button>
+      </div>`;
+  };
+
+  (window as any).playAgain = function () { (window as any).openGame(); };
+
+  (window as any).closeGame = function () {
+    const modal = document.getElementById('gameModal');
+    if (modal) modal.style.display = 'none';
+    document.body.style.overflow = '';
+    if (gameMap) { gameMap.remove(); gameMap = null; }
+  };
+
+  (window as any).openGame = async function () {
+    const modal = document.getElementById('gameModal');
+    if (!modal) return;
+    modal.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+    const panel = document.getElementById('gamePanel');
+    const prompt = document.getElementById('gamePrompt');
+    const prog = document.getElementById('gameProgress');
+    const container = document.getElementById('gameMap');
+    if (container) container.innerHTML = '';
+    if (prompt) prompt.textContent = '';
+    if (prog) prog.textContent = '';
+    if (panel) panel.innerHTML = '<div class="map-info-loading">Shuffling questions…</div>';
+    try {
+      const res = await fetch('/api/practice');
+      gameRound = (await res.json()).questions || [];
+    } catch { gameRound = []; }
+    if (!gameRound.length) {
+      if (panel) panel.innerHTML = '<div class="map-info-loading">No questions cached yet — check back tomorrow.</div>';
+      return;
+    }
+    gameIdx = 0; gameTotal = 0; gameRaw = [];
+    setGameScore();
+    await loadMapLibre();
+    startGameQuestion();
+  };
+
   // ── Boot ──────────────────────────────────────────────────────────────────────
 
   Promise.all([loadScores(), loadQuestions()]);
@@ -973,4 +1141,29 @@ const CSS = `
   .maplibregl-ctrl-attrib { background:rgba(0,0,0,0.5) !important; color:#6b7a99 !important; font-size:9px !important; }
   .maplibregl-ctrl-attrib a { color:#3b82f6 !important; }
   .maplibregl-ctrl-zoom-in, .maplibregl-ctrl-zoom-out, .maplibregl-ctrl-compass { background:var(--surface) !important; border-color:var(--border) !important; color:var(--text) !important; }
+
+  /* ── Secret practice game ── */
+  .header-logo { cursor:pointer; user-select:none; -webkit-tap-highlight-color:transparent; }
+  .game-modal { position:fixed; inset:0; z-index:1100; background:var(--bg); display:flex; flex-direction:column; }
+  .game-bar { display:flex; align-items:center; gap:12px; padding:10px 14px; background:var(--surface); border-bottom:1px solid var(--border); flex-shrink:0; }
+  .game-score-box { border:1px solid var(--accent); border-radius:8px; padding:4px 10px; text-align:center; min-width:62px; }
+  .game-score-lbl { font-size:8px; letter-spacing:0.12em; color:var(--accent); font-weight:700; }
+  .game-score-val { font-size:18px; font-weight:700; font-variant-numeric:tabular-nums; font-family:ui-monospace,Menlo,monospace; }
+  .game-progress { flex:1; text-align:center; font-size:12px; font-weight:600; letter-spacing:0.06em; color:var(--muted); text-transform:uppercase; }
+  .game-prompt { padding:12px 16px; font-size:14px; line-height:1.5; background:var(--surface); border-bottom:1px solid var(--border); flex-shrink:0; min-height:20px; }
+  .game-panel { flex-shrink:0; background:var(--surface); border-top:1px solid var(--border); max-height:42vh; overflow-y:auto; }
+  .game-hint { padding:16px; text-align:center; color:var(--muted); font-size:13px; }
+  .game-pin { width:16px; height:16px; border-radius:50%; background:#fff; border:2px solid var(--accent); box-shadow:0 1px 4px rgba(0,0,0,0.6); }
+  .game-pin.answer { width:24px; height:24px; border-radius:50%; background:var(--green); border:2px solid #fff; color:#06310f; display:flex; align-items:center; justify-content:center; font-size:13px; font-weight:700; }
+  .game-result-line { display:flex; align-items:center; gap:8px; margin-bottom:10px; flex-wrap:wrap; }
+  .game-dot { width:14px; height:14px; border-radius:50%; flex-shrink:0; }
+  .game-result-pts { font-size:15px; font-weight:700; }
+  .game-result-dist { font-size:12px; color:var(--muted); margin-left:auto; font-variant-numeric:tabular-nums; }
+  .game-next-btn { display:block; width:100%; margin-top:14px; background:var(--accent); border:none; border-radius:10px; color:#fff; font-size:14px; font-weight:700; padding:12px; cursor:pointer; transition:opacity 0.15s; }
+  .game-next-btn:hover { opacity:0.9; }
+  .game-final { text-align:center; }
+  .game-final-emojis { font-size:22px; letter-spacing:4px; margin-bottom:10px; }
+  .game-final-score { font-size:34px; font-weight:800; font-variant-numeric:tabular-nums; }
+  .game-final-score span { font-size:18px; color:var(--muted); font-weight:600; }
+  .game-final-lbl { font-size:13px; color:var(--muted); margin-top:4px; }
 `;
