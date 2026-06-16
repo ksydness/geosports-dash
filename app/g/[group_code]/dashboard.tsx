@@ -417,10 +417,10 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
 
   function computeAllStats() {
     const allUsers = [...new Set(allScores.map(s => s.username))];
-    type Stat = { username:string;daysPlayed:number;daysWon:number;weeksWon:number;monthsWon:number;totalScore:number;bestScore:number;avg:number;currentStreak:number;bestStreak:number;lastPlace:number;h2h:Record<string,{w:number;l:number;t:number}> };
+    type Stat = { username:string;daysPlayed:number;daysWon:number;weeksWon:number;monthsWon:number;totalScore:number;bestScore:number;avg:number;currentStreak:number;bestStreak:number;lastPlace:number;currentLosingStreak:number;h2h:Record<string,{w:number;l:number;t:number}> };
     const stats: Record<string, Stat> = {};
     allUsers.forEach(u => {
-      stats[u] = { username:u,daysPlayed:0,daysWon:0,weeksWon:0,monthsWon:0,totalScore:0,bestScore:0,avg:0,currentStreak:0,bestStreak:0,lastPlace:0,h2h:{} };
+      stats[u] = { username:u,daysPlayed:0,daysWon:0,weeksWon:0,monthsWon:0,totalScore:0,bestScore:0,avg:0,currentStreak:0,bestStreak:0,lastPlace:0,currentLosingStreak:0,h2h:{} };
       allUsers.forEach(v => { if (v !== u) stats[u].h2h[v] = {w:0,l:0,t:0}; });
     });
     const byDate: Record<string, typeof allScores> = {};
@@ -471,6 +471,28 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
     allScores.forEach(s => { const mk=s.date.slice(0,7); if(!byMonth[mk])byMonth[mk]={}; byMonth[mk][s.username]=(byMonth[mk][s.username]||0)+s.score; });
     Object.values(byMonth).forEach(mk => { if(Object.keys(mk).length<2)return; const top=Math.max(...Object.values(mk)); Object.entries(mk).forEach(([u,sc])=>{if(sc>=top&&stats[u])stats[u].monthsWon++;}); });
     allUsers.forEach(u => { stats[u].avg = stats[u].daysPlayed>0?Math.round(stats[u].totalScore/stats[u].daysPlayed):0; });
+    // Current (active) losing streak: consecutive most-recent played days without a win.
+    // A win requires a 2+ player day; solo days don't break the streak.
+    const wonByUser: Record<string, Set<string>> = {};
+    Object.entries(byDate).forEach(([date, players]) => {
+      if (players.length < 2) return;
+      const dayTop = Math.max(...players.map(p => p.score));
+      players.forEach(p => {
+        if (p.score >= dayTop) {
+          if (!wonByUser[p.username]) wonByUser[p.username] = new Set();
+          wonByUser[p.username].add(date);
+        }
+      });
+    });
+    allUsers.forEach(u => {
+      const dates = [...new Set(allScores.filter(s=>s.username===u).map(s=>s.date))].sort();
+      let streak = 0;
+      for (let i=dates.length-1; i>=0; i--) {
+        if (wonByUser[u] && wonByUser[u].has(dates[i])) break;
+        streak++;
+      }
+      stats[u].currentLosingStreak = streak;
+    });
     return stats;
   }
 
@@ -595,6 +617,10 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
       const spoon = users.reduce((b,u)=>(!b||u.lastPlace>b.lastPlace)?u:b, null as typeof users[0]|null);
       if (spoon && spoon.lastPlace>0) {
         spoonHtml = `<div class="record-card wooden-spoon"><div class="record-emoji">🥄</div><div class="record-val">${spoon.lastPlace}</div><div class="record-name">${esc(spoon.username)}</div><div class="record-lbl">Wooden Spoon · Most Last-Place Finishes</div></div>`;
+      }
+      const cold = users.reduce((b,u)=>(!b||u.currentLosingStreak>b.currentLosingStreak)?u:b, null as typeof users[0]|null);
+      if (cold && cold.currentLosingStreak>0) {
+        spoonHtml += `<div class="record-card wooden-spoon"><div class="record-emoji">🥶</div><div class="record-val">${cold.currentLosingStreak}</div><div class="record-name">${esc(cold.username)}</div><div class="record-lbl">Cold Streak · Longest Active No-Win Streak</div></div>`;
       }
     }
     const sorted = [...users].sort((a,b)=>b.daysWon-a.daysWon||b.avg-a.avg);
