@@ -179,8 +179,29 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
     if (!content || !content.parentNode) return;
     const banner = document.createElement('div');
     banner.id = 'inactiveBanner';
-    banner.style.cssText = 'background:rgba(251,191,36,0.1);border:1px solid rgba(251,191,36,0.3);border-radius:8px;padding:10px 14px;font-size:12px;color:#fde68a;margin-bottom:12px;';
-    banner.textContent = '⚠️ Sync paused — session token expired. Update your token to resume.';
+    banner.style.cssText = 'background:rgba(251,191,36,0.1);border:1px solid rgba(251,191,36,0.3);border-radius:8px;padding:12px 14px;font-size:13px;color:#fde68a;margin-bottom:12px;';
+    // Static markup only (no user input) — safe to set as innerHTML. The buttons
+    // call window-scoped handlers defined below. Submitting updates THIS group via
+    // the register endpoint (upsert on group_code), so it never creates a duplicate.
+    banner.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
+        <span>⚠️ Sync paused — your GeoSports session token expired.</span>
+        <button id="tokenToggleBtn" onclick="toggleTokenForm()" style="background:rgba(251,191,36,0.2);border:1px solid rgba(251,191,36,0.5);color:#fde68a;border-radius:6px;padding:5px 10px;font-size:12px;cursor:pointer;white-space:nowrap;">Update token →</button>
+      </div>
+      <div id="tokenForm" style="display:none;margin-top:10px;border-top:1px solid rgba(251,191,36,0.25);padding-top:10px;">
+        <div style="font-size:12px;line-height:1.55;color:#fcd9a0;margin-bottom:8px;">
+          Grab a fresh token — this <b>updates your existing group</b>, it does not create a new one:<br>
+          1. Log in at <a href="https://geosports.app" target="_blank" rel="noopener" style="color:#fde68a;">geosports.app</a><br>
+          2. Open DevTools (F12, or ⌥⌘I on Mac) → <b>Application</b> ▸ <b>Cookies</b> ▸ https://geosports.app<br>
+          3. Copy the value of <code style="background:rgba(0,0,0,0.3);padding:1px 4px;border-radius:3px;">__Secure-geosports.session_token</code><br>
+          4. Paste it below and resume.
+        </div>
+        <textarea id="tokenInput" rows="2" placeholder="Paste your __Secure-geosports.session_token value" style="width:100%;box-sizing:border-box;background:rgba(0,0,0,0.25);border:1px solid rgba(251,191,36,0.4);border-radius:6px;color:#fff;font-size:12px;padding:7px;resize:vertical;"></textarea>
+        <div style="display:flex;align-items:center;gap:10px;margin-top:8px;flex-wrap:wrap;">
+          <button id="tokenSubmitBtn" onclick="submitTokenUpdate()" style="background:#f59e0b;border:none;color:#1a1a1a;font-weight:600;border-radius:6px;padding:7px 14px;font-size:12px;cursor:pointer;">Resume syncing</button>
+          <span id="tokenStatus" style="font-size:12px;"></span>
+        </div>
+      </div>`;
     content.parentNode.insertBefore(banner, content);
   }
 
@@ -215,6 +236,45 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
     if (btn) { btn.textContent = '↻ Syncing…'; btn.disabled = true; }
     await loadScores(true);
     if (btn) { btn.textContent = '↻ Refresh'; btn.disabled = false; }
+  };
+
+  (window as any).toggleTokenForm = function() {
+    const form = document.getElementById('tokenForm');
+    if (!form) return;
+    const isOpen = form.style.display !== 'none';
+    form.style.display = isOpen ? 'none' : 'block';
+    const toggle = document.getElementById('tokenToggleBtn');
+    if (toggle) toggle.textContent = isOpen ? 'Update token →' : 'Cancel';
+    if (!isOpen) (document.getElementById('tokenInput') as HTMLElement | null)?.focus();
+  };
+
+  // Submit a new token for THIS group. /api/register upserts on group_code, so it
+  // re-activates and re-backfills the existing group rather than creating a new one.
+  (window as any).submitTokenUpdate = async function() {
+    const input = document.getElementById('tokenInput') as HTMLTextAreaElement | null;
+    const status = document.getElementById('tokenStatus');
+    const btn = document.getElementById('tokenSubmitBtn') as HTMLButtonElement | null;
+    const token = (input?.value || '').trim();
+    const setStatus = (msg: string, color: string) => {
+      if (status) { status.textContent = msg; status.style.color = color; }
+    };
+    if (!token) { setStatus('Paste your session token first.', '#fca5a5'); return; }
+    if (btn) { btn.disabled = true; btn.textContent = 'Verifying…'; }
+    setStatus('Verifying token and resuming sync…', '#fde68a');
+    try {
+      const res = await fetch('/api/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ group_code: groupCode, session_token: token }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not verify token');
+      setStatus('✓ Token updated — reloading…', '#86efac');
+      setTimeout(() => location.reload(), 900);
+    } catch (e: any) {
+      setStatus(e?.message || 'Could not verify token', '#fca5a5');
+      if (btn) { btn.disabled = false; btn.textContent = 'Resume syncing'; }
+    }
   };
 
   // ── Date utils ────────────────────────────────────────────────────────────────
