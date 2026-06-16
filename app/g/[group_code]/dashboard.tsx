@@ -417,10 +417,10 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
 
   function computeAllStats() {
     const allUsers = [...new Set(allScores.map(s => s.username))];
-    type Stat = { username:string;daysPlayed:number;daysWon:number;weeksWon:number;monthsWon:number;totalScore:number;bestScore:number;avg:number;currentStreak:number;bestStreak:number;lastPlace:number;currentLosingStreak:number;h2h:Record<string,{w:number;l:number;t:number}> };
+    type Stat = { username:string;daysPlayed:number;daysWon:number;weeksWon:number;monthsWon:number;totalScore:number;bestScore:number;avg:number;currentStreak:number;bestStreak:number;lastPlace:number;currentLosingStreak:number;worstScore:number;h2h:Record<string,{w:number;l:number;t:number}> };
     const stats: Record<string, Stat> = {};
     allUsers.forEach(u => {
-      stats[u] = { username:u,daysPlayed:0,daysWon:0,weeksWon:0,monthsWon:0,totalScore:0,bestScore:0,avg:0,currentStreak:0,bestStreak:0,lastPlace:0,currentLosingStreak:0,h2h:{} };
+      stats[u] = { username:u,daysPlayed:0,daysWon:0,weeksWon:0,monthsWon:0,totalScore:0,bestScore:0,avg:0,currentStreak:0,bestStreak:0,lastPlace:0,currentLosingStreak:0,worstScore:999999,h2h:{} };
       allUsers.forEach(v => { if (v !== u) stats[u].h2h[v] = {w:0,l:0,t:0}; });
     });
     const byDate: Record<string, typeof allScores> = {};
@@ -433,6 +433,7 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
         const u = stats[p.username];
         u.daysPlayed++; u.totalScore += p.score;
         if (p.score > u.bestScore) u.bestScore = p.score;
+        if (p.score < u.worstScore) u.worstScore = p.score;
         // Solo days don't count as wins — beating nobody is no victory
         if (players.length >= 2 && p.score >= top) u.daysWon++;
         // Wooden spoon: last place only counts when there's someone to lose to
@@ -612,11 +613,23 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
     ];
     const recordsHtml = records.map(r=>`<div class="record-card"><div class="record-emoji">${r.emoji}</div><div class="record-val">${r.val}</div><div class="record-name">${esc(r.name)}</div><div class="record-lbl">${r.lbl}</div></div>`).join('');
     // ── Wooden Spoon — group-specific inside joke, only for Crank Drive, Putt off Green ──
+    // Bad-stat mirror of the four record cards, same order (Days Won→Wooden Spoon, Best Score→Lowest Score,
+    // Best Average→Lowest Average, Longest Streak→Cold Streak). Group-specific to Crank Drive, Putt off Green.
     let spoonHtml = '';
     if (groupCode === 'TXA6HQ') {
       const spoon = users.reduce((b,u)=>(!b||u.lastPlace>b.lastPlace)?u:b, null as typeof users[0]|null);
       if (spoon && spoon.lastPlace>0) {
-        spoonHtml = `<div class="record-card wooden-spoon"><div class="record-emoji">🥄</div><div class="record-val">${spoon.lastPlace}</div><div class="record-name">${esc(spoon.username)}</div><div class="record-lbl">Wooden Spoon · Most Last-Place Finishes</div></div>`;
+        spoonHtml += `<div class="record-card wooden-spoon"><div class="record-emoji">🥄</div><div class="record-val">${spoon.lastPlace}</div><div class="record-name">${esc(spoon.username)}</div><div class="record-lbl">Wooden Spoon · Most Last-Place Finishes</div></div>`;
+      }
+      const worst = users.reduce((b,u)=>(!b||u.worstScore<b.worstScore)?u:b, null as typeof users[0]|null);
+      if (worst) {
+        spoonHtml += `<div class="record-card wooden-spoon"><div class="record-emoji">💀</div><div class="record-val">${worst.worstScore}</div><div class="record-name">${esc(worst.username)}</div><div class="record-lbl">Lowest Score</div></div>`;
+      }
+      const minLowAvg = 10; // mirror of Best Average but stricter, so it reflects regular players
+      const qualLow = users.filter(u=>u.daysPlayed>=minLowAvg);
+      const lowAvg = (qualLow.length?qualLow:users).reduce((b,u)=>(!b||u.avg<b.avg)?u:b, null as typeof users[0]|null);
+      if (lowAvg) {
+        spoonHtml += `<div class="record-card wooden-spoon"><div class="record-emoji">📉</div><div class="record-val">${lowAvg.avg}</div><div class="record-name">${esc(lowAvg.username)}</div><div class="record-lbl">Lowest Average</div></div>`;
       }
       const cold = users.reduce((b,u)=>(!b||u.currentLosingStreak>b.currentLosingStreak)?u:b, null as typeof users[0]|null);
       if (cold && cold.currentLosingStreak>0) {
