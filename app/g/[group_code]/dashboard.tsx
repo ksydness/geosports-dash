@@ -635,11 +635,10 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
       {emoji:'🔥',val:bestStrk?.bestStreak??0,name:bestStrk?.username??'—',lbl:'Longest Streak'},
     ];
     const recordsHtml = records.map(r=>`<div class="record-card"><div class="record-emoji">${r.emoji}</div><div class="record-val">${r.val}</div><div class="record-name">${esc(r.name)}</div><div class="record-lbl">${r.lbl}</div></div>`).join('');
-    // ── Wooden Spoon — group-specific inside joke, only for Crank Drive, Putt off Green ──
     // Bad-stat mirror of the four record cards, same order (Days Won→Wooden Spoon, Best Score→Lowest Score,
-    // Best Average→Lowest Average, Longest Streak→Cold Streak). Group-specific to Crank Drive, Putt off Green.
+    // Best Average→Lowest Average, Longest Streak→Cold Streak). Shown for all groups.
     let spoonHtml = '';
-    if (groupCode === 'TXA6HQ') {
+    {
       const spoon = users.reduce((b,u)=>(!b||u.lastPlace>b.lastPlace)?u:b, null as typeof users[0]|null);
       if (spoon && spoon.lastPlace>0) {
         spoonHtml += `<div class="record-card wooden-spoon"><div class="record-emoji">🥄</div><div class="record-val">${spoon.lastPlace}</div><div class="record-name">${esc(spoon.username)}</div><div class="record-lbl">Wooden Spoon · Most Last-Place Finishes</div></div>`;
