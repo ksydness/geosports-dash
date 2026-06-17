@@ -1,11 +1,19 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 
 export default function Home() {
   const router = useRouter();
   const [groupCode, setGroupCode] = useState('');
+
+  // Prefill the group code when arriving from a "set up this group" link
+  // (e.g. /?code=4YU5Z3) on an unregistered dashboard. Read from window to
+  // avoid the Suspense boundary that useSearchParams requires in Next 15.
+  useEffect(() => {
+    const code = new URLSearchParams(window.location.search).get('code');
+    if (code) setGroupCode(code.trim().toUpperCase().slice(0, 10));
+  }, []);
   const [sessionToken, setSessionToken] = useState('');
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);

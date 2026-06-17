@@ -168,6 +168,12 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
     try {
       const res = await fetch(`/api/scores/${groupCode}${forceSync ? '?sync=1' : ''}`);
       const data = await res.json();
+      // 404 = this group code was never registered. Show a friendly "set it up"
+      // prompt instead of a generic error, and prefill the code on the home form.
+      if (res.status === 404) {
+        showUnregistered();
+        return;
+      }
       if (!res.ok) throw new Error(data.error || 'Failed to load');
       allScores = canonicalizeNames(data.scores || []);
       lastFetched = new Date();
@@ -192,6 +198,26 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
         questionsCache[round.date] = round.questions.map((q: any) => q.prompt);
       }
     } catch { /* non-fatal */ }
+  }
+
+  function showUnregistered() {
+    // Static markup only (groupCode is escaped) — safe to set as innerHTML.
+    const title = document.getElementById('groupTitle');
+    if (title) title.textContent = 'Group not set up yet';
+    setContent(`
+      <div class="empty-state" style="text-align:center;padding:40px 20px;max-width:420px;margin:0 auto;">
+        <div style="font-size:40px;margin-bottom:12px;">🌍</div>
+        <h2 style="font-size:18px;margin:0 0 8px;">This group isn't set up yet</h2>
+        <p style="font-size:14px;color:#94a3b8;margin:0 0 20px;line-height:1.5;">
+          No GeoSports group is registered under code <strong>${esc(groupCode)}</strong>.
+          Connect it with your session token to start tracking scores and history here.
+        </p>
+        <a href="/?code=${encodeURIComponent(groupCode)}"
+           style="display:inline-block;background:#22c55e;color:#04140a;font-weight:600;text-decoration:none;border-radius:8px;padding:11px 20px;font-size:14px;">
+          Set up this group →
+        </a>
+      </div>
+    `);
   }
 
   function showInactiveBanner() {
