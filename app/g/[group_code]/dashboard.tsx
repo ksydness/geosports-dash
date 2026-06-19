@@ -189,22 +189,32 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
     return currentSite === 'geosports';
   }
 
-  // Combined "Sicko Mode": each player's daily total summed across every site
-  // they played that day, matched on the shared stable userId. rawScores aren't
-  // comparable across games, so the combined view is totals-only.
+  // Empty-state copy — Sicko Mode explains its all-games-in-a-day gate.
+  function emptyMsg(): string {
+    return currentSite === 'sicko'
+      ? 'No full Sicko days yet 😈 — play all your connected games in one day to make this board.'
+      : 'No scores recorded yet.';
+  }
+
+  // Combined "Sicko Mode": you only make the board for a day if you played EVERY
+  // connected game that day — true sickos only. Each qualifying day is summed
+  // across games by the shared stable userId. rawScores aren't comparable across
+  // games, so the combined view is totals-only. Incomplete days are dropped, so a
+  // player with no complete day in the period simply doesn't appear.
   function buildCombined(rows: Row[]): Row[] {
-    const byKey: Record<string, Row> = {};
+    const required = connectedSites().length; // all connected games (3 when all 3 linked)
+    const acc: Record<string, { row: Row; sites: Set<string> }> = {};
     for (const r of rows) {
       if (!r.userId) continue;
       const key = `${r.date}|${r.userId}`;
-      if (!byKey[key]) {
-        byKey[key] = { date: r.date, site: 'sicko', userId: r.userId, username: r.username, score: 0 };
+      if (!acc[key]) {
+        acc[key] = { row: { date: r.date, site: 'sicko', userId: r.userId, username: r.username, score: 0 }, sites: new Set() };
       }
-      byKey[key].score += r.score;
-      // Keep the most-recent username as the label (canonicalizeNames refines further).
-      byKey[key].username = r.username;
+      acc[key].row.score += r.score;
+      acc[key].row.username = r.username; // latest label; canonicalizeNames refines further
+      acc[key].sites.add(r.site || 'geosports');
     }
-    return Object.values(byKey);
+    return Object.values(acc).filter(a => a.sites.size >= required).map(a => a.row);
   }
 
   // Rebuild the active-view score array + prompt cache, then re-render.
@@ -748,7 +758,7 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
     }
     html += '<div class="card">';
     if (entries.length===0) {
-      html += '<div class="empty">No scores recorded yet.</div>';
+      html += `<div class="empty">${emptyMsg()}</div>`;
     } else {
       let playedRank = 0;
       entries.forEach(e => {
@@ -794,7 +804,7 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
   }
 
   function renderStats() {
-    if (!allScores.length) { setContent('<div class="empty">No scores recorded yet.</div>'); return; }
+    if (!allScores.length) { setContent(`<div class="empty">${emptyMsg()}</div>`); return; }
     const stats = computeAllStats();
     const users = Object.values(stats).filter(u=>u.daysPlayed>0);
     const minAvg = 5;
