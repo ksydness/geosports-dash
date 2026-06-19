@@ -58,6 +58,7 @@ export default function Dashboard({ groupCode, initialData }: Props) {
           <p id="groupSub">Dashboard</p>
         </div>
         <div className="site-bar" id="siteBar"></div>
+        <div className="play-bar" id="playBar"></div>
         <div className="tabs">
           <div className="tab active" data-tab="today" onClick={() => (window as any).switchTab('today')}>Today</div>
           <div className="tab" data-tab="week" onClick={() => (window as any).switchTab('week')}>Week</div>
@@ -238,6 +239,7 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
         : `${SITE_INFO[currentSite]?.emoji || ''} ${SITE_INFO[currentSite]?.label || 'Dashboard'}`;
     }
     renderSiteBar();
+    renderPlayBar();
     if (currentTab === 'stats') renderStats(); else renderTab(currentTab);
   }
 
@@ -356,6 +358,20 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
       chips.push(`<button class="site-chip site-chip-add" title="Connect another game" onclick="openConnect()">＋</button>`);
     }
     bar.innerHTML = chips.join('');
+  }
+
+  // "Play today" launcher — a button per game that opens that day's round in a
+  // new tab, so nobody has to remember the three URLs.
+  function renderPlayBar() {
+    const bar = document.getElementById('playBar');
+    if (!bar) return;
+    if (initialData) { bar.style.display = 'none'; return; }
+    bar.style.display = 'flex';
+    const links = SITE_ORDER.map(s => {
+      const info = SITE_INFO[s];
+      return `<a class="play-btn" style="--chip:${info.accent}" href="https://${info.host}" target="_blank" rel="noopener">${info.emoji} ${esc(info.label)} <span class="play-arrow">▶</span></a>`;
+    }).join('');
+    bar.innerHTML = `<span class="play-lbl">Play today</span>${links}`;
   }
 
   // Per-site "token expired" banners (one row per inactive connection).
@@ -1359,6 +1375,14 @@ const CSS = `
   .site-chip:hover { color:var(--text); }
   .site-chip.active { color:#fff; border-color:var(--chip); background:color-mix(in srgb, var(--chip) 22%, transparent); box-shadow:inset 0 0 0 1px var(--chip); }
   .site-chip-add { color:var(--muted); font-size:15px; font-weight:700; padding:5px 12px; line-height:1; }
+
+  /* ── Play-today launcher ── */
+  .play-bar { display:flex; gap:8px; align-items:center; background:var(--surface); border-bottom:1px solid var(--border); padding:9px 14px; overflow-x:auto; }
+  .play-bar::-webkit-scrollbar { display:none; }
+  .play-lbl { flex-shrink:0; font-size:10px; font-weight:700; letter-spacing:0.07em; text-transform:uppercase; color:var(--muted); margin-right:2px; }
+  .play-btn { flex-shrink:0; display:inline-flex; align-items:center; gap:5px; background:color-mix(in srgb, var(--chip) 14%, transparent); border:1px solid color-mix(in srgb, var(--chip) 45%, transparent); border-radius:999px; color:var(--text); font-size:12.5px; font-weight:600; padding:5px 12px; text-decoration:none; white-space:nowrap; transition:background 0.15s; }
+  .play-btn:hover { background:color-mix(in srgb, var(--chip) 26%, transparent); }
+  .play-arrow { font-size:9px; color:var(--chip); }
 
   .content { max-width:560px; margin:0 auto; padding:16px 14px 40px; }
   .period-label { font-size:11px; font-weight:600; letter-spacing:0.08em; text-transform:uppercase; color:var(--muted); margin-bottom:10px; }
