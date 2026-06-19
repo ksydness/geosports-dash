@@ -3,17 +3,17 @@ import { waitUntil } from '@vercel/functions';
 import { supabase } from '@/lib/supabase';
 import { decrypt } from '@/lib/crypto';
 import { backfillGroup } from '@/lib/sync';
+import { Site, isSite } from '@/lib/sites';
 
-// Full backfill takes ~20s
+// Full backfill takes ~20s per site.
 export const maxDuration = 60;
 
 const THROTTLE_MS = 24 * 60 * 60 * 1000;
 
-// Re-run the 30-day backfill for an existing group, e.g. when the registration
-// backfill left holes. Uses the group's stored session token. Open to anyone,
-// but throttled to once per 24h per group; a Bearer CRON_SECRET header bypasses
-// the throttle. Runs in the background — returns 202 immediately.
-//   GET/POST https://geosports-dash.vercel.app/api/backfill/GROUPCODE
+// Re-run the 30-day backfill for an existing group across all its active site
+// connections (or one site via ?site=). Uses each connection's stored token.
+// Throttled to once per 24h per site; a Bearer CRON_SECRET header bypasses it.
+//   GET/POST /api/backfill/GROUPCODE[?site=geohistory]
 async function handle(
   req: NextRequest,
   { params }: { params: Promise<{ group_code: string }> }
@@ -23,40 +23,50 @@ async function handle(
 
   const { group_code } = await params;
   const code = group_code.toUpperCase();
+  const onlySite = req.nextUrl.searchParams.get('site');
 
-  const { data: group, error } = await supabase
-    .from('groups')
-    .select('session_token, active, last_backfilled_at')
-    .eq('group_code', code)
-    .single();
+  let query = supabase
+    .from('group_sites')
+    .select('site, active, last_backfilled_at, session_token')
+    .eq('group_code', code);
+  if (onlySite && isSite(onlySite)) query = query.eq('site', onlySite);
 
-  if (error || !group) {
-    return NextResponse.json({ error: 'Group not found' }, { status: 404 });
+  const { data: rows, error } = await query;
+  if (error || !rows || rows.length === 0) {
+    return NextResponse.json({ error: 'Group (or site) not found' }, { status: 404 });
   }
-  if (!group.active) {
-    return NextResponse.json(
-      { error: 'Group is inactive — re-register with a fresh session token' },
-      { status: 409 }
-    );
-  }
-  if (!isAdmin && group.last_backfilled_at) {
-    const elapsed = Date.now() - new Date(group.last_backfilled_at).getTime();
-    if (elapsed < THROTTLE_MS) {
-      return NextResponse.json(
-        { error: 'Backfill already ran in the last 24 hours — try again later' },
-        { status: 429 }
-      );
+
+  const started: string[] = [];
+  const skipped: { site: string; reason: string }[] = [];
+
+  for (const row of rows) {
+    if (!isSite(row.site)) continue;
+    if (!row.active) {
+      skipped.push({ site: row.site, reason: 'inactive — re-connect with a fresh token' });
+      continue;
     }
+    if (!isAdmin && row.last_backfilled_at) {
+      const elapsed = Date.now() - new Date(row.last_backfilled_at).getTime();
+      if (elapsed < THROTTLE_MS) {
+        skipped.push({ site: row.site, reason: 'backfilled in the last 24h' });
+        continue;
+      }
+    }
+    const site = row.site as Site;
+    waitUntil(
+      backfillGroup(code, decrypt(row.session_token), site).catch(err =>
+        console.error(`Manual backfill failed for ${code}/${site}:`, err)
+      )
+    );
+    started.push(site);
   }
 
-  waitUntil(
-    backfillGroup(code, decrypt(group.session_token)).catch(err =>
-      console.error(`Manual backfill failed for ${code}:`, err)
-    )
-  );
+  if (started.length === 0) {
+    return NextResponse.json({ group_code: code, started, skipped, error: 'Nothing to back fill' }, { status: 429 });
+  }
 
   return NextResponse.json(
-    { group_code: code, status: 'started', note: 'Backfill runs ~20-30s; refresh the dashboard after' },
+    { group_code: code, started, skipped, note: 'Backfill runs ~20-30s per site; refresh after' },
     { status: 202 }
   );
 }

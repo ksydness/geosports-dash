@@ -3,8 +3,19 @@ import { waitUntil } from '@vercel/functions';
 import { supabase } from '@/lib/supabase';
 import { AuthError } from '@/lib/geosports';
 import { syncGroup } from '@/lib/sync';
+import { Site, isSite } from '@/lib/sites';
 
 const STALE_AFTER_MS = 3 * 60 * 1000; // 3 minutes
+
+// Live sync may touch up to 3 sites — give it room beyond the 10s default.
+export const maxDuration = 60;
+
+interface SiteRow {
+  site: string;
+  active: boolean;
+  last_synced_at: string | null;
+  session_token: string;
+}
 
 export async function GET(
   req: NextRequest,
@@ -12,13 +23,11 @@ export async function GET(
 ) {
   const { group_code } = await params;
   const code = group_code.toUpperCase();
-  // ?sync=1 (the dashboard Refresh button) = sync from GeoSports *before* responding,
-  // so a fresh play shows up in a single refresh.
   const forceSync = req.nextUrl.searchParams.get('sync') === '1';
 
   const groupRes = await supabase
     .from('groups')
-    .select('group_name, active, last_synced_at, session_token')
+    .select('group_name')
     .eq('group_code', code)
     .single();
 
@@ -26,46 +35,60 @@ export async function GET(
     return NextResponse.json({ error: 'Group not found' }, { status: 404 });
   }
 
-  const group = groupRes.data;
-  let active = group.active;
-  let lastSyncedAt = group.last_synced_at;
+  const sitesRes = await supabase
+    .from('group_sites')
+    .select('site, active, last_synced_at, session_token')
+    .eq('group_code', code);
 
-  if (active) {
-    if (forceSync) {
-      // Live sync — block until GeoSports has been fetched
-      try {
-        await syncGroup(code, group.session_token);
-        lastSyncedAt = new Date().toISOString();
-      } catch (err) {
-        if (err instanceof AuthError) active = false; // syncGroup already deactivated the row
-        else console.error(`Live sync failed for ${code}:`, err);
-      }
-    } else {
-      // Stale-while-revalidate — return cached data, sync in the background
-      const lastSync = lastSyncedAt ? new Date(lastSyncedAt).getTime() : 0;
-      const isStale = Date.now() - lastSync > STALE_AFTER_MS;
-      if (isStale) {
-        waitUntil(
-          syncGroup(code, group.session_token).catch(err =>
-            console.error(`Background sync failed for ${code}:`, err)
-          )
-        );
-      }
+  const siteRows: SiteRow[] = (sitesRes.data || []).filter(r => isSite(r.site));
+
+  // Sync helper for one site; updates the in-memory row's last_synced_at/active.
+  async function liveSync(row: SiteRow) {
+    try {
+      await syncGroup(code, row.session_token, row.site as Site);
+      row.last_synced_at = new Date().toISOString();
+    } catch (err) {
+      if (err instanceof AuthError) row.active = false;
+      else console.error(`Sync failed for ${code}/${row.site}:`, err);
+    }
+  }
+
+  const activeRows = siteRows.filter(r => r.active);
+  if (forceSync) {
+    // Block until every active site has been pulled, so a fresh play shows up
+    // in a single refresh.
+    await Promise.all(activeRows.map(liveSync));
+  } else {
+    // Stale-while-revalidate — return cached data, sync stale sites in the bg.
+    const stale = activeRows.filter(r => {
+      const last = r.last_synced_at ? new Date(r.last_synced_at).getTime() : 0;
+      return Date.now() - last > STALE_AFTER_MS;
+    });
+    if (stale.length) {
+      waitUntil(
+        Promise.all(stale.map(liveSync)).catch(err =>
+          console.error(`Background sync failed for ${code}:`, err)
+        )
+      );
     }
   }
 
   const scoresRes = await supabase
     .from('scores')
-    .select('date, user_id, username, score, raw_scores')
+    .select('date, site, user_id, username, score, raw_scores')
     .eq('group_code', code)
     .order('date', { ascending: false });
 
   return NextResponse.json({
-    group_name: group.group_name,
-    active,
-    last_synced_at: lastSyncedAt,
+    group_name: groupRes.data.group_name,
+    sites: siteRows.map(r => ({
+      site: r.site,
+      active: r.active,
+      last_synced_at: r.last_synced_at,
+    })),
     scores: (scoresRes.data || []).map(s => ({
       date: s.date,
+      site: s.site,
       userId: s.user_id,
       username: s.username,
       score: s.score,

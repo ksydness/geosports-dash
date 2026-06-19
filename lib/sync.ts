@@ -1,11 +1,13 @@
 import { supabase } from './supabase';
 import { decrypt } from './crypto';
 import { fetchDayScores, fetchGroupDay, AuthError, GeoScoreEntry } from './geosports';
+import { Site } from './sites';
 import { todayET, etDateMinusDays } from './dates';
 
-/** Upsert one day's scores for a group. */
+/** Upsert one day's scores for a group on a given site. */
 export async function upsertDayScores(
   groupCode: string,
+  site: Site,
   date: string,
   played: GeoScoreEntry[]
 ): Promise<void> {
@@ -15,16 +17,16 @@ export async function upsertDayScores(
       .filter(s => s.userId)
       .map(s => ({
         group_code: groupCode,
+        site,
         date,
         user_id: s.userId,
         username: s.username, // mutable display label — latest write wins
         score: s.score,
         // Only write raw_scores when present, so a later sync that lacks
-        // per-question detail (GeoSports drops it for older dates) never
-        // clobbers detail we already captured.
+        // per-question detail never clobbers detail we already captured.
         ...(s.rawScores != null ? { raw_scores: s.rawScores } : {}),
       })),
-    { onConflict: 'group_code,date,user_id' }
+    { onConflict: 'group_code,site,date,user_id' }
   );
 }
 
@@ -34,93 +36,98 @@ function sleep(ms: number) {
 
 export const BACKFILL_DAYS = 30;
 
+/** Deactivate a single site connection (e.g. after its token is rejected). */
+async function deactivateSite(groupCode: string, site: Site) {
+  await supabase
+    .from('group_sites')
+    .update({ active: false })
+    .eq('group_code', groupCode)
+    .eq('site', site);
+}
+
 /**
- * Backfill the last `days` days (ET) from GeoSports. Each day retries once on
- * transient failure — GeoSports errors intermittently under rapid sequential
- * requests, which previously left silent holes in a new group's history.
- * Upserts only, so it is always safe to re-run. On AuthError the group is
- * deactivated and the error rethrown. Returns the number of rows written.
+ * Backfill the last `days` days (ET) for a group on a site. Upserts only, so it
+ * is safe to re-run. On AuthError the site connection is deactivated and the
+ * error rethrown. Returns rows written.
  *
- * NOTE: a full run takes ~20s — callers need `export const maxDuration = 60`.
+ * A full run takes ~20s — callers need `export const maxDuration = 60`.
  */
 export async function backfillGroup(
   groupCode: string,
   sessionToken: string,
+  site: Site,
   days = BACKFILL_DAYS
 ): Promise<number> {
   let written = 0;
-  // Claim the run up front — also powers the public endpoint's 24h throttle
   await supabase
-    .from('groups')
+    .from('group_sites')
     .update({ last_backfilled_at: new Date().toISOString() })
-    .eq('group_code', groupCode);
+    .eq('group_code', groupCode)
+    .eq('site', site);
   try {
     for (let i = 0; i < days; i++) {
       const date = etDateMinusDays(i);
-      let played: GeoScoreEntry[] | null = await fetchDayScores(groupCode, sessionToken, date);
+      let played: GeoScoreEntry[] | null = await fetchDayScores(groupCode, sessionToken, date, site);
       if (played === null) {
-        // transient failure — back off and retry once
         await sleep(1200);
-        played = await fetchDayScores(groupCode, sessionToken, date);
-        if (played === null) console.error(`Backfill: ${groupCode} ${date} failed after retry`);
+        played = await fetchDayScores(groupCode, sessionToken, date, site);
+        if (played === null) console.error(`Backfill: ${groupCode}/${site} ${date} failed after retry`);
       }
       if (played && played.length > 0) {
-        await upsertDayScores(groupCode, date, played);
+        await upsertDayScores(groupCode, site, date, played);
         written += played.length;
       }
-      await sleep(400); // polite pacing for GeoSports
+      await sleep(400);
     }
   } catch (err) {
-    if (err instanceof AuthError) {
-      await supabase.from('groups').update({ active: false }).eq('group_code', groupCode);
-    }
+    if (err instanceof AuthError) await deactivateSite(groupCode, site);
     throw err;
   }
   await supabase
-    .from('groups')
+    .from('group_sites')
     .update({ last_synced_at: new Date().toISOString() })
-    .eq('group_code', groupCode);
-  console.log(`Backfill complete for ${groupCode}: ${written} rows over ${days} days`);
+    .eq('group_code', groupCode)
+    .eq('site', site);
+  console.log(`Backfill complete for ${groupCode}/${site}: ${written} rows over ${days} days`);
   return written;
 }
 
 /**
- * Sync today and yesterday (Eastern time) for a group. Yesterday is included so
- * plays made between the previous day's last sync and midnight ET are still
- * captured after rollover.
- *
- * On AuthError (expired/invalid token) the group is deactivated and the error
- * is rethrown. Returns the number of score rows synced.
+ * Sync today + yesterday (ET) for a group on a site. On AuthError the site
+ * connection is deactivated and the error rethrown. Returns rows synced.
+ * Also refreshes the shared group name (same across sites).
  */
-export async function syncGroup(groupCode: string, encryptedToken: string): Promise<number> {
+export async function syncGroup(
+  groupCode: string,
+  encryptedToken: string,
+  site: Site
+): Promise<number> {
   const token = decrypt(encryptedToken);
   let synced = 0;
   let liveName: string | null = null;
   try {
     for (const date of [todayET(), etDateMinusDays(1)]) {
-      // Use fetchGroupDay on the first (today) request so we can also refresh the
-      // stored group name — groups registered before the name fix have the code
-      // saved as their name; this self-heals them on the next sync.
-      const day = await fetchGroupDay(groupCode, token, date);
+      const day = await fetchGroupDay(groupCode, token, date, site);
       if (day) {
         if (liveName === null && day.groupName) liveName = day.groupName;
         if (day.played.length > 0) {
-          await upsertDayScores(groupCode, date, day.played);
+          await upsertDayScores(groupCode, site, date, day.played);
           synced += day.played.length;
         }
       }
     }
   } catch (err) {
-    if (err instanceof AuthError) {
-      await supabase.from('groups').update({ active: false }).eq('group_code', groupCode);
-    }
+    if (err instanceof AuthError) await deactivateSite(groupCode, site);
     throw err;
   }
-  const update: { last_synced_at: string; group_name?: string } = {
-    last_synced_at: new Date().toISOString(),
-  };
-  // Only overwrite the name when the API gave us a real one that differs from the code.
-  if (liveName && liveName !== groupCode) update.group_name = liveName;
-  await supabase.from('groups').update(update).eq('group_code', groupCode);
+  await supabase
+    .from('group_sites')
+    .update({ last_synced_at: new Date().toISOString() })
+    .eq('group_code', groupCode)
+    .eq('site', site);
+  // The group name is shared across sites — keep the groups row fresh.
+  if (liveName && liveName !== groupCode) {
+    await supabase.from('groups').update({ group_name: liveName }).eq('group_code', groupCode);
+  }
   return synced;
 }

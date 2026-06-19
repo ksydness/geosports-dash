@@ -1,8 +1,7 @@
 import { todayET } from './dates';
+import { Site, SITES, DEFAULT_SITE } from './sites';
 
-const BASE = 'https://geosports.app';
-
-/** Thrown when the GeoSports session token is rejected (expired/invalid). */
+/** Thrown when a site session token is rejected (expired/invalid). */
 export class AuthError extends Error {
   constructor(message = 'Session token rejected') {
     super(message);
@@ -10,18 +9,52 @@ export class AuthError extends Error {
   }
 }
 
-function authHeaders(sessionToken: string) {
+// Once we learn which cookie name a site authenticates with, remember it for
+// the rest of this serverless invocation (a backfill makes ~30 sequential
+// requests; only the first pays the candidate-probing cost).
+const resolvedCookieName: Partial<Record<Site, string>> = {};
+
+function baseHeaders(site: Site, cookieName: string, token: string) {
+  const { base } = SITES[site];
   return {
-    Cookie: `__Secure-geosports.session_token=${sessionToken}`,
-    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-    'Accept': 'application/json, text/plain, */*',
-    'Referer': 'https://geosports.app/',
-    'Origin': 'https://geosports.app',
+    Cookie: `${cookieName}=${token}`,
+    'User-Agent':
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+    Accept: 'application/json, text/plain, */*',
+    Referer: `${base}/`,
+    Origin: base,
   };
 }
 
+/**
+ * Fetch a path on a site's API with the group's session token, trying each
+ * candidate cookie name until one authenticates. Returns the Response for the
+ * authenticated name (or the last response if every candidate was rejected).
+ * Throws only on network error.
+ */
+async function siteFetch(site: Site, token: string, path: string): Promise<Response> {
+  const { base, cookieNames } = SITES[site];
+  const url = `${base}${path}`;
+
+  // Use the previously-resolved name first if we have one.
+  const order = resolvedCookieName[site]
+    ? [resolvedCookieName[site]!, ...cookieNames.filter(n => n !== resolvedCookieName[site])]
+    : cookieNames;
+
+  let last: Response | null = null;
+  for (const name of order) {
+    const res = await fetch(url, { headers: baseHeaders(site, name, token) });
+    if (res.status !== 401 && res.status !== 403) {
+      resolvedCookieName[site] = name; // this name is accepted by the server
+      return res;
+    }
+    last = res;
+  }
+  return last as Response; // all candidates rejected — caller treats as AuthError
+}
+
 export interface GeoScoreEntry {
-  /** Stable GeoSports user id (UUID). Identity — usernames are mutable. */
+  /** Stable user id (UUID) — shared across all three sites. Usernames are mutable. */
   userId: string;
   username: string;
   score: number;
@@ -29,9 +62,7 @@ export interface GeoScoreEntry {
 }
 
 export interface GeoGroupResponse {
-  // Current API nests group metadata here (restructured ~2026-06-14).
   group?: { id?: string; name?: string; code?: string; memberCount?: number };
-  // Legacy top-level fields — kept for backward compatibility.
   name?: string;
   groupName?: string;
   group_name?: string;
@@ -39,53 +70,47 @@ export interface GeoGroupResponse {
   error?: string;
 }
 
-/**
- * Pull a human-readable group name from a group response, checking the current
- * nested shape (`group.name`) first, then falling back through legacy top-level
- * fields. Returns null if no real name is present (caller can default to the code).
- */
+/** Pull a human-readable group name from a group response (nested shape first). */
 export function extractGroupName(data: GeoGroupResponse): string | null {
   return data.group?.name || data.name || data.groupName || data.group_name || null;
 }
 
 export interface GeoDayResult {
-  /** Group display name from the live API, or null if absent. */
   groupName: string | null;
-  /** Played leaderboard entries for the date (filtered to valid scores). */
   played: GeoScoreEntry[];
 }
 
-/** Validate credentials + get group info. Throws if auth fails. */
+const tokenRejected = (site: Site) =>
+  `${SITES[site].label} session token rejected — make sure you copied the full value of the ${SITES[site].cookieNames[0]} cookie from DevTools and that you are logged in to ${SITES[site].base.replace('https://', '')}`;
+
+/** Validate credentials + get group info for a site. Throws if auth fails. */
 export async function fetchGroupInfo(
   groupCode: string,
-  sessionToken: string
+  sessionToken: string,
+  site: Site = DEFAULT_SITE
 ): Promise<GeoGroupResponse> {
-  const res = await fetch(`${BASE}/api/groups/${groupCode}?date=${todayET()}`, {
-    headers: authHeaders(sessionToken),
-  });
-  if (res.status === 401 || res.status === 403) throw new Error('Session token rejected — make sure you copied the full value of __Secure-geosports.session_token from DevTools and that you are logged in to geosports.app');
-  if (!res.ok) throw new Error(`GeoSports returned HTTP ${res.status}`);
+  const res = await siteFetch(site, sessionToken, `/api/groups/${groupCode}?date=${todayET()}`);
+  if (res.status === 401 || res.status === 403) throw new Error(tokenRejected(site));
+  if (!res.ok) throw new Error(`${SITES[site].label} returned HTTP ${res.status}`);
   const data: GeoGroupResponse = await res.json();
-  if (data.error === 'Not authenticated') throw new Error('Session token rejected — make sure you copied the full value of __Secure-geosports.session_token from DevTools and that you are logged in to geosports.app');
+  if (data.error === 'Not authenticated') throw new Error(tokenRejected(site));
   if (data.error) throw new Error(data.error);
   return data;
 }
 
 /**
- * Fetch a group's name + played scores for a specific date in one request.
- * Throws AuthError if the session token is rejected (so callers can deactivate the group).
- * Returns null on any other (transient) error.
+ * Fetch a group's name + played scores for a date on a site. Throws AuthError
+ * if the token is rejected; returns null on any other (transient) error.
  */
 export async function fetchGroupDay(
   groupCode: string,
   sessionToken: string,
-  date: string
+  date: string,
+  site: Site = DEFAULT_SITE
 ): Promise<GeoDayResult | null> {
   let res: Response;
   try {
-    res = await fetch(`${BASE}/api/groups/${groupCode}?date=${date}`, {
-      headers: authHeaders(sessionToken),
-    });
+    res = await siteFetch(site, sessionToken, `/api/groups/${groupCode}?date=${date}`);
   } catch {
     return null; // network error — transient
   }
@@ -105,22 +130,20 @@ export async function fetchGroupDay(
   };
 }
 
-/**
- * Fetch played scores for a specific date. Thin wrapper over fetchGroupDay for
- * callers that don't need the group name (e.g. backfill). Propagates AuthError.
- */
+/** Fetch played scores for a date on a site. Propagates AuthError. */
 export async function fetchDayScores(
   groupCode: string,
   sessionToken: string,
-  date: string
+  date: string,
+  site: Site = DEFAULT_SITE
 ): Promise<GeoScoreEntry[] | null> {
-  const r = await fetchGroupDay(groupCode, sessionToken, date);
+  const r = await fetchGroupDay(groupCode, sessionToken, date, site);
   return r ? r.played : null;
 }
 
-/** Proxy the public questions endpoint (no auth needed). */
-export async function fetchQuestions() {
-  const res = await fetch(`${BASE}/api/v2/questions`);
+/** Proxy a site's public questions endpoint (no auth needed). */
+export async function fetchQuestions(site: Site = DEFAULT_SITE) {
+  const res = await fetch(`${SITES[site].base}/api/v2/questions`);
   if (!res.ok) return null;
   return res.json();
 }

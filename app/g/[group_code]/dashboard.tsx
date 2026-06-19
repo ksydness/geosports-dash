@@ -5,10 +5,17 @@ import { milesToRawScore, haversineMiles, scoreTier, greatCirclePoints } from '@
 
 interface ScoreEntry {
   date: string;
+  site?: string;
   userId?: string;
   username: string;
   score: number;
   rawScores?: number[];
+}
+
+interface SiteMeta {
+  site: string;
+  active: boolean;
+  last_synced_at?: string | null;
 }
 
 interface InitialData {
@@ -16,6 +23,16 @@ interface InitialData {
   scores: ScoreEntry[];
   active: boolean;
 }
+
+// Display metadata for each site (mirrors lib/sites.ts). 'sicko' is the synthetic
+// combined view — only Sickos play all three every day.
+const SITE_INFO: Record<string, { label: string; host: string; cookie: string; emoji: string; accent: string }> = {
+  geosports:  { label: 'GeoSports',  host: 'geosports.app',  cookie: '__Secure-geosports.session_token',  emoji: '🏟️', accent: '#3b82f6' },
+  geohistory: { label: 'GeoHistory', host: 'geohistory.gg',  cookie: '__Secure-geohistory.session_token', emoji: '📜', accent: '#a855f7' },
+  geofooty:   { label: 'GeoFooty',   host: 'geofooty.app',   cookie: '__Secure-geofooty.session_token',   emoji: '⚽', accent: '#22c55e' },
+};
+const SITE_ORDER = ['geosports', 'geohistory', 'geofooty'];
+const SICKO = { label: 'Sicko Mode', emoji: '😈', accent: '#f59e0b' };
 
 interface Props {
   groupCode: string;
@@ -38,8 +55,9 @@ export default function Dashboard({ groupCode, initialData }: Props) {
         <div className="header">
           <div className="header-logo" onClick={() => (window as any).openGame && (window as any).openGame()}>🌍</div>
           <h1 id="groupTitle">Loading…</h1>
-          <p>GeoSports Dashboard</p>
+          <p id="groupSub">Dashboard</p>
         </div>
+        <div className="site-bar" id="siteBar"></div>
         <div className="tabs">
           <div className="tab active" data-tab="today" onClick={() => (window as any).switchTab('today')}>Today</div>
           <div className="tab" data-tab="week" onClick={() => (window as any).switchTab('week')}>Week</div>
@@ -82,6 +100,14 @@ export default function Dashboard({ groupCode, initialData }: Props) {
         </div>
         <div id="gamePanel" className="game-panel"></div>
         <div id="gameResults" className="game-results" style={{display:'none'}}></div>
+      </div>
+
+      {/* Connect / update a game's token */}
+      <div id="connectModal" className="connect-modal" style={{display:'none'}}>
+        <div className="connect-card">
+          <button className="connect-close" onClick={() => (window as any).closeConnect()}>✕</button>
+          <div id="connectBody"></div>
+        </div>
       </div>
 
     </>
@@ -141,11 +167,63 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
   const Q_MULTIPLIERS = [1, 1, 2, 3, 3];
   const Q_MAX_PTS     = [100, 100, 200, 300, 300];
 
-  let allScores: {date:string;userId?:string;username:string;score:number;rawScores?:number[]}[] = [];
-  let questionsCache: Record<string, string[]> = {};
+  type Row = {date:string;site?:string;userId?:string;username:string;score:number;rawScores?:number[]};
+  let masterScores: Row[] = [];        // every site's rows, as returned by the API
+  let sitesMeta: SiteMeta[] = [];      // which sites are connected + their state
+  let currentSite = 'geosports';       // active view: a site key or 'sicko'
+  let allScores: Row[] = [];           // rows for the active view (site-filtered or combined)
+  let questionsBySite: Record<string, Record<string, string[]>> = {};
+  let questionsCache: Record<string, string[]> = {}; // prompts for the active site
   let currentTab = 'today';
   let lastFetched: Date | null = null;
   let openEntry: string | null = null;
+
+  // Sites the group is connected to, in canonical order.
+  function connectedSites(): string[] {
+    return SITE_ORDER.filter(s => sitesMeta.some(m => m.site === s));
+  }
+
+  // Maps + the answer-key / practice features are GeoSports-only (the answer
+  // data comes from GeoSports), so gate those controls to the GeoSports view.
+  function mapsEnabled(): boolean {
+    return currentSite === 'geosports';
+  }
+
+  // Combined "Sicko Mode": each player's daily total summed across every site
+  // they played that day, matched on the shared stable userId. rawScores aren't
+  // comparable across games, so the combined view is totals-only.
+  function buildCombined(rows: Row[]): Row[] {
+    const byKey: Record<string, Row> = {};
+    for (const r of rows) {
+      if (!r.userId) continue;
+      const key = `${r.date}|${r.userId}`;
+      if (!byKey[key]) {
+        byKey[key] = { date: r.date, site: 'sicko', userId: r.userId, username: r.username, score: 0 };
+      }
+      byKey[key].score += r.score;
+      // Keep the most-recent username as the label (canonicalizeNames refines further).
+      byKey[key].username = r.username;
+    }
+    return Object.values(byKey);
+  }
+
+  // Rebuild the active-view score array + prompt cache, then re-render.
+  function applySite() {
+    if (currentSite === 'sicko') {
+      allScores = canonicalizeNames(buildCombined(masterScores));
+    } else {
+      allScores = canonicalizeNames(masterScores.filter(s => (s.site || 'geosports') === currentSite));
+    }
+    questionsCache = questionsBySite[currentSite] || {};
+    const sub = document.getElementById('groupSub');
+    if (sub) {
+      sub.textContent = currentSite === 'sicko'
+        ? '😈 Sicko Mode · all games combined'
+        : `${SITE_INFO[currentSite]?.emoji || ''} ${SITE_INFO[currentSite]?.label || 'Dashboard'}`;
+    }
+    renderSiteBar();
+    if (currentTab === 'stats') renderStats(); else renderTab(currentTab);
+  }
 
   // ── Data loading ─────────────────────────────────────────────────────────────
 
@@ -154,11 +232,13 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
   async function loadScores(forceSync = false) {
     // If pre-loaded demo data was provided, use it directly — no fetch needed
     if (initialData) {
-      allScores = canonicalizeNames(initialData.scores || []);
+      masterScores = (initialData.scores || []).map(s => ({ ...s, site: s.site || 'geosports' }));
+      sitesMeta = [{ site: 'geosports', active: initialData.active !== false }];
+      currentSite = 'geosports';
       lastFetched = new Date();
       const title = document.getElementById('groupTitle');
       if (title) title.textContent = initialData.group_name || groupCode;
-      renderTab(currentTab);
+      applySite();
       renderFooter();
       return;
     }
@@ -175,27 +255,43 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
         return;
       }
       if (!res.ok) throw new Error(data.error || 'Failed to load');
-      allScores = canonicalizeNames(data.scores || []);
+      masterScores = (data.scores || []).map((s: Row) => ({ ...s, site: s.site || 'geosports' }));
+      sitesMeta = (data.sites && data.sites.length) ? data.sites : [{ site: 'geosports', active: true }];
+      // Resolve the active view: keep it if still connected, else prefer
+      // GeoSports, else the first connected site.
+      const conn = connectedSites();
+      if (currentSite !== 'sicko' && !conn.includes(currentSite)) {
+        currentSite = conn.includes('geosports') ? 'geosports' : (conn[0] || 'geosports');
+      }
       lastFetched = new Date();
       const title = document.getElementById('groupTitle');
       if (title) title.textContent = data.group_name || groupCode;
-      renderTab(currentTab);
+      // Lazy-load question prompts for each connected site.
+      conn.forEach(s => { if (!questionsBySite[s]) loadQuestions(s); });
+      applySite();
       renderFooter();
-      // Show AFTER renderTab — renderTab overwrites #tabContent's innerHTML,
+      // Show AFTER applySite — renderTab overwrites #tabContent's innerHTML,
       // which would wipe a banner prepended beforehand.
-      if (!data.active) showInactiveBanner();
+      showInactiveBanners();
     } catch (e: any) {
       setContent(`<div class="error-box">Could not load scores.<br><small>${esc(e.message)}</small></div>`);
     }
   }
 
-  async function loadQuestions() {
+  async function loadQuestions(site = currentSite) {
     try {
-      const res = await fetch('/api/questions');
+      const res = await fetch(`/api/questions?site=${encodeURIComponent(site)}`);
       if (!res.ok) return;
       const data = await res.json();
+      const cache: Record<string, string[]> = {};
       for (const round of (data.rounds || [])) {
-        questionsCache[round.date] = round.questions.map((q: any) => q.prompt);
+        cache[round.date] = round.questions.map((q: any) => q.prompt);
+      }
+      questionsBySite[site] = cache;
+      // If this is the site currently being viewed, surface the prompts now.
+      if (site === currentSite) {
+        questionsCache = cache;
+        if (currentTab !== 'stats') renderTab(currentTab);
       }
     } catch { /* non-fatal */ }
   }
@@ -220,37 +316,50 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
     `);
   }
 
-  function showInactiveBanner() {
-    // Insert as a sibling BEFORE #tabContent (not inside it) so it survives the
-    // innerHTML resets that renderTab/setContent perform on every tab switch.
-    if (document.getElementById('inactiveBanner')) return; // dedupe
+  // Render the site switcher: a chip per connected game, Sicko Mode when ≥2 are
+  // connected, and a ＋ to connect another.
+  function renderSiteBar() {
+    const bar = document.getElementById('siteBar');
+    if (!bar) return;
+    const conn = connectedSites();
+    if (initialData || conn.length === 0) { bar.style.display = 'none'; return; }
+    bar.style.display = 'flex';
+    const chips: string[] = [];
+    conn.forEach(s => {
+      const info = SITE_INFO[s];
+      if (!info) return;
+      const inactive = sitesMeta.some(m => m.site === s && !m.active);
+      const active = currentSite === s;
+      chips.push(`<button class="site-chip${active ? ' active' : ''}" style="${active ? `--chip:${info.accent};` : ''}" onclick="setSite('${s}')">${info.emoji} ${esc(info.label)}${inactive ? ' ⚠️' : ''}</button>`);
+    });
+    if (conn.length >= 2) {
+      const active = currentSite === 'sicko';
+      chips.push(`<button class="site-chip${active ? ' active' : ''}" style="${active ? `--chip:${SICKO.accent};` : ''}" onclick="setSite('sicko')">${SICKO.emoji} ${SICKO.label}</button>`);
+    }
+    if (conn.length < 3) {
+      chips.push(`<button class="site-chip site-chip-add" title="Connect another game" onclick="openConnect()">＋</button>`);
+    }
+    bar.innerHTML = chips.join('');
+  }
+
+  // Per-site "token expired" banners (one row per inactive connection).
+  function showInactiveBanners() {
+    const old = document.getElementById('inactiveBanner');
+    if (old) old.remove();
+    const inactive = sitesMeta.filter(m => !m.active && SITE_INFO[m.site]);
+    if (!inactive.length) return;
     const content = document.getElementById('tabContent');
     if (!content || !content.parentNode) return;
     const banner = document.createElement('div');
     banner.id = 'inactiveBanner';
-    banner.style.cssText = 'background:rgba(251,191,36,0.1);border:1px solid rgba(251,191,36,0.3);border-radius:8px;padding:12px 14px;font-size:13px;color:#fde68a;margin-bottom:12px;';
-    // Static markup only (no user input) — safe to set as innerHTML. The buttons
-    // call window-scoped handlers defined below. Submitting updates THIS group via
-    // the register endpoint (upsert on group_code), so it never creates a duplicate.
-    banner.innerHTML = `
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
-        <span>⚠️ Sync paused — your GeoSports session token expired.</span>
-        <button id="tokenToggleBtn" onclick="toggleTokenForm()" style="background:rgba(251,191,36,0.2);border:1px solid rgba(251,191,36,0.5);color:#fde68a;border-radius:6px;padding:5px 10px;font-size:12px;cursor:pointer;white-space:nowrap;">Update token →</button>
-      </div>
-      <div id="tokenForm" style="display:none;margin-top:10px;border-top:1px solid rgba(251,191,36,0.25);padding-top:10px;">
-        <div style="font-size:12px;line-height:1.55;color:#fcd9a0;margin-bottom:8px;">
-          Grab a fresh token — this <b>updates your existing group</b>, it does not create a new one:<br>
-          1. Log in at <a href="https://geosports.app" target="_blank" rel="noopener" style="color:#fde68a;">geosports.app</a><br>
-          2. Open DevTools (F12, or ⌥⌘I on Mac) → <b>Application</b> ▸ <b>Cookies</b> ▸ https://geosports.app<br>
-          3. Copy the value of <code style="background:rgba(0,0,0,0.3);padding:1px 4px;border-radius:3px;">__Secure-geosports.session_token</code><br>
-          4. Paste it below and resume.
-        </div>
-        <textarea id="tokenInput" rows="2" placeholder="Paste your __Secure-geosports.session_token value" style="width:100%;box-sizing:border-box;background:rgba(0,0,0,0.25);border:1px solid rgba(251,191,36,0.4);border-radius:6px;color:#fff;font-size:12px;padding:7px;resize:vertical;"></textarea>
-        <div style="display:flex;align-items:center;gap:10px;margin-top:8px;flex-wrap:wrap;">
-          <button id="tokenSubmitBtn" onclick="submitTokenUpdate()" style="background:#f59e0b;border:none;color:#1a1a1a;font-weight:600;border-radius:6px;padding:7px 14px;font-size:12px;cursor:pointer;">Resume syncing</button>
-          <span id="tokenStatus" style="font-size:12px;"></span>
-        </div>
+    banner.className = 'inactive-banner';
+    banner.innerHTML = inactive.map(m => {
+      const info = SITE_INFO[m.site];
+      return `<div class="inactive-row">
+        <span>⚠️ ${esc(info.label)} sync paused — its session token expired.</span>
+        <button class="inactive-btn" onclick="openConnect('${m.site}')">Update token →</button>
       </div>`;
+    }).join('');
     content.parentNode.insertBefore(banner, content);
   }
 
@@ -287,42 +396,78 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
     if (btn) { btn.textContent = '↻ Refresh'; btn.disabled = false; }
   };
 
-  (window as any).toggleTokenForm = function() {
-    const form = document.getElementById('tokenForm');
-    if (!form) return;
-    const isOpen = form.style.display !== 'none';
-    form.style.display = isOpen ? 'none' : 'block';
-    const toggle = document.getElementById('tokenToggleBtn');
-    if (toggle) toggle.textContent = isOpen ? 'Update token →' : 'Cancel';
-    if (!isOpen) (document.getElementById('tokenInput') as HTMLElement | null)?.focus();
+  (window as any).setSite = function(site: string) {
+    if (site === currentSite) return;
+    currentSite = site;
+    openEntry = null;
+    if (!questionsBySite[site] && site !== 'sicko') loadQuestions(site);
+    applySite();
   };
 
-  // Submit a new token for THIS group. /api/register upserts on group_code, so it
-  // re-activates and re-backfills the existing group rather than creating a new one.
-  (window as any).submitTokenUpdate = async function() {
-    const input = document.getElementById('tokenInput') as HTMLTextAreaElement | null;
-    const status = document.getElementById('tokenStatus');
-    const btn = document.getElementById('tokenSubmitBtn') as HTMLButtonElement | null;
+  // Open the connect modal — with no site it shows a picker of unconnected
+  // games; with a site it shows that game's token form. Used both to add a new
+  // game and to refresh an expired token (register upserts per group_code+site).
+  (window as any).openConnect = function(site?: string) {
+    const modal = document.getElementById('connectModal');
+    const body = document.getElementById('connectBody');
+    if (!modal || !body) return;
+    const conn = connectedSites();
+    if (!site) {
+      const avail = SITE_ORDER.filter(s => !conn.includes(s));
+      if (avail.length === 0) {
+        body.innerHTML = `<div class="connect-title">All games connected 🎉</div>`;
+      } else {
+        body.innerHTML = `<div class="connect-title">Connect another game</div>
+          <div class="connect-sub">Track another game for this group. You only need to be logged into it.</div>
+          <div class="connect-pick">${avail.map(s => `<button class="connect-pick-btn" style="--chip:${SITE_INFO[s].accent}" onclick="openConnect('${s}')">${SITE_INFO[s].emoji} ${esc(SITE_INFO[s].label)}</button>`).join('')}</div>`;
+      }
+    } else {
+      const info = SITE_INFO[site];
+      body.innerHTML = `
+        <div class="connect-title">${info.emoji} Connect ${esc(info.label)}</div>
+        <div class="connect-steps">
+          1. Log in at <a href="https://${info.host}" target="_blank" rel="noopener" style="color:${info.accent}">${info.host}</a><br>
+          2. DevTools (F12) → <b>Application</b> ▸ <b>Cookies</b> ▸ https://${info.host}<br>
+          3. Copy the value of <code>${esc(info.cookie)}</code>
+        </div>
+        <textarea id="connectInput" rows="3" class="connect-input" placeholder="Paste ${esc(info.label)} session token"></textarea>
+        <div class="connect-actions">
+          <button class="connect-submit" style="background:${info.accent}" onclick="submitConnect('${site}')">Connect ${esc(info.label)}</button>
+          <span id="connectStatus" class="connect-status"></span>
+        </div>`;
+      setTimeout(() => (document.getElementById('connectInput') as HTMLElement | null)?.focus(), 50);
+    }
+    modal.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+  };
+
+  (window as any).closeConnect = function() {
+    const modal = document.getElementById('connectModal');
+    if (modal) modal.style.display = 'none';
+    document.body.style.overflow = '';
+  };
+
+  (window as any).submitConnect = async function(site: string) {
+    const input = document.getElementById('connectInput') as HTMLTextAreaElement | null;
+    const status = document.getElementById('connectStatus');
     const token = (input?.value || '').trim();
     const setStatus = (msg: string, color: string) => {
       if (status) { status.textContent = msg; status.style.color = color; }
     };
-    if (!token) { setStatus('Paste your session token first.', '#fca5a5'); return; }
-    if (btn) { btn.disabled = true; btn.textContent = 'Verifying…'; }
-    setStatus('Verifying token and resuming sync…', '#fde68a');
+    if (!token) { setStatus('Paste your token first.', '#fca5a5'); return; }
+    setStatus('Verifying…', '#cbd5e1');
     try {
       const res = await fetch('/api/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ group_code: groupCode, session_token: token }),
+        body: JSON.stringify({ group_code: groupCode, tokens: { [site]: token } }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Could not verify token');
-      setStatus('✓ Token updated — reloading…', '#86efac');
+      setStatus('✓ Connected — reloading…', '#86efac');
       setTimeout(() => location.reload(), 900);
     } catch (e: any) {
       setStatus(e?.message || 'Could not verify token', '#fca5a5');
-      if (btn) { btn.disabled = false; btn.textContent = 'Resume syncing'; }
     }
   };
 
@@ -409,7 +554,9 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
         </div>
       </div>`;
     }).join('');
-    const mapBtn = `<button class="user-map-btn" onclick="event.stopPropagation();openUserMap('${date}',${attrJs(username)})">\ud83c\udfaf See ${esc(username)}'s guesses on the map</button>`;
+    const mapBtn = mapsEnabled()
+      ? `<button class="user-map-btn" onclick="event.stopPropagation();openUserMap('${date}',${attrJs(username)})">\ud83c\udfaf See ${esc(username)}'s guesses on the map</button>`
+      : '';
     return `<div class="breakdown-inner"><div class="dot-row">${dots}</div>${bars}${mapBtn}</div>`;
   }
 
@@ -417,13 +564,15 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
     const rows = [...days].reverse().map(d => {
       const tc = totalTierClass(d.score, 1000);
       const dots = (d.rawScores || []).map(r => `<div class="mini-dot ${dotClass(r)}"></div>`).join('');
-      const mapIcon = `<button class="day-map-icon" onclick="event.stopPropagation();openMapReview('${d.date}')" title="View on map">📍</button>`;
-      const ringIcon = `<button class="day-map-icon" onclick="event.stopPropagation();openUserMap('${d.date}',${attrJs(username)})" title="See this player\u2019s distance rings">\ud83c\udfaf</button>`;
+      const icons = mapsEnabled()
+        ? `<button class="day-map-icon" onclick="event.stopPropagation();openMapReview('${d.date}')" title="View on map">📍</button>` +
+          `<button class="day-map-icon" onclick="event.stopPropagation();openUserMap('${d.date}',${attrJs(username)})" title="See this player\u2019s distance rings">\ud83c\udfaf</button>`
+        : '';
       return `<div class="day-row">
         <div class="day-date-lbl">${formatDisplayDate(d.date)}</div>
         <div class="day-score-num ${tc}">${d.score}</div>
         ${dots ? `<div class="day-mini-dots">${dots}</div>` : ''}
-        ${mapIcon}${ringIcon}
+        ${icons}
       </div>`;
     }).join('');
     return `<div class="breakdown-inner">${rows}</div>`;
@@ -589,7 +738,7 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
     const totalDays = isToday?null:[...new Set(filtered.map(s=>s.date))].length;
     const avgScore = played.length?Math.round(played.reduce((s,e)=>s+(e.avg??0),0)/played.length):null;
     const mapBtn = `<button class="map-review-btn" onclick="openMapReview('${start}')">🗺 Map</button>`;
-    let html = `<div class="period-label-row"><span class="period-label">${label}</span>${isToday ? mapBtn : ''}</div>`;
+    let html = `<div class="period-label-row"><span class="period-label">${label}</span>${isToday && mapsEnabled() ? mapBtn : ''}</div>`;
     if (!isToday && played.length>0) {
       html += `<div class="stats-strip">
         <div class="stat"><div class="stat-val">${totalDays}</div><div class="stat-lbl">Days</div></div>
@@ -1135,7 +1284,7 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
 
   // ── Boot ──────────────────────────────────────────────────────────────────────
 
-  Promise.all([loadScores(), loadQuestions()]);
+  loadScores();
 }
 
 // ─── CSS ──────────────────────────────────────────────────────────────────────
@@ -1186,6 +1335,15 @@ const CSS = `
   .tab { flex:1; padding:12px 6px 11px; text-align:center; font-size:13px; font-weight:500; color:var(--muted); cursor:pointer; border-bottom:2px solid transparent; transition:color 0.15s,border-color 0.15s; user-select:none; }
   .tab:hover { color:var(--text); }
   .tab.active { color:var(--text); border-bottom-color:var(--accent); }
+
+  /* ── Site switcher ── */
+  .site-bar { display:flex; gap:8px; align-items:center; background:var(--surface); border-bottom:1px solid var(--border); padding:10px 14px; overflow-x:auto; }
+  .site-bar::-webkit-scrollbar { display:none; }
+  .site-chip { flex-shrink:0; background:var(--surface2); border:1px solid var(--border); border-radius:999px; color:var(--muted); font-size:12.5px; font-weight:600; padding:6px 13px; cursor:pointer; white-space:nowrap; transition:color 0.15s,border-color 0.15s,background 0.15s; }
+  .site-chip:hover { color:var(--text); }
+  .site-chip.active { color:#fff; border-color:var(--chip); background:color-mix(in srgb, var(--chip) 22%, transparent); box-shadow:inset 0 0 0 1px var(--chip); }
+  .site-chip-add { color:var(--muted); font-size:15px; font-weight:700; padding:5px 12px; line-height:1; }
+
   .content { max-width:560px; margin:0 auto; padding:16px 14px 40px; }
   .period-label { font-size:11px; font-weight:600; letter-spacing:0.08em; text-transform:uppercase; color:var(--muted); margin-bottom:10px; }
   .card { background:var(--surface); border:1px solid var(--border); border-radius:14px; overflow:hidden; }
@@ -1338,4 +1496,27 @@ const CSS = `
   .game-bd-fill { height:100%; border-radius:5px; transition:width 0.5s ease; }
   .game-bd-pts { width:42px; text-align:right; font-size:13px; font-weight:700; font-variant-numeric:tabular-nums; flex-shrink:0; }
   .game-final-lbl { font-size:13px; color:var(--muted); margin-top:6px; }
+
+  /* ── Inactive (expired token) banners ── */
+  .inactive-banner { margin-bottom:12px; display:flex; flex-direction:column; gap:8px; }
+  .inactive-row { background:rgba(251,191,36,0.1); border:1px solid rgba(251,191,36,0.3); border-radius:8px; padding:10px 12px; font-size:13px; color:#fde68a; display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; }
+  .inactive-btn { background:rgba(251,191,36,0.2); border:1px solid rgba(251,191,36,0.5); color:#fde68a; border-radius:6px; padding:5px 10px; font-size:12px; cursor:pointer; white-space:nowrap; }
+  .inactive-btn:hover { background:rgba(251,191,36,0.32); }
+
+  /* ── Connect / update-token modal ── */
+  .connect-modal { position:fixed; inset:0; z-index:1200; background:rgba(4,8,16,0.78); display:flex; align-items:center; justify-content:center; padding:20px; }
+  .connect-card { position:relative; width:100%; max-width:420px; background:var(--surface); border:1px solid var(--border); border-radius:16px; padding:24px 22px; box-shadow:0 12px 48px rgba(0,0,0,0.6); }
+  .connect-close { position:absolute; top:14px; right:16px; background:none; border:none; color:var(--muted); font-size:20px; line-height:1; cursor:pointer; }
+  .connect-close:hover { color:var(--text); }
+  .connect-title { font-size:17px; font-weight:700; margin-bottom:6px; }
+  .connect-sub { font-size:13px; color:var(--muted); line-height:1.5; margin-bottom:14px; }
+  .connect-pick { display:flex; flex-direction:column; gap:8px; }
+  .connect-pick-btn { background:var(--surface2); border:1px solid var(--border); border-radius:10px; color:var(--text); font-size:14px; font-weight:600; padding:11px 14px; cursor:pointer; text-align:left; box-shadow:inset 0 0 0 1px transparent; transition:box-shadow 0.15s; }
+  .connect-pick-btn:hover { box-shadow:inset 0 0 0 1px var(--chip); }
+  .connect-steps { font-size:12px; line-height:1.6; color:#c7d3f0; background:rgba(255,255,255,0.04); border:1px solid var(--border); border-radius:8px; padding:10px 12px; margin:6px 0 12px; }
+  .connect-steps code { background:rgba(0,0,0,0.35); padding:1px 5px; border-radius:3px; font-size:11px; }
+  .connect-input { width:100%; box-sizing:border-box; background:#080e1a; border:1px solid rgba(255,255,255,0.12); border-radius:8px; color:#fff; font-size:13px; padding:9px; resize:vertical; }
+  .connect-actions { display:flex; align-items:center; gap:10px; margin-top:12px; flex-wrap:wrap; }
+  .connect-submit { border:none; color:#fff; font-weight:700; border-radius:8px; padding:9px 16px; font-size:13px; cursor:pointer; }
+  .connect-status { font-size:12px; }
 `;
