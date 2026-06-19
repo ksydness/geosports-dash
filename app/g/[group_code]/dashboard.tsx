@@ -189,6 +189,12 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
     return currentSite === 'geosports';
   }
 
+  // A perfect day = 1,000 per game. Sicko Mode combines every connected game,
+  // so its perfect day is N × 1,000 (3,000 with all three linked).
+  function dayMax(): number {
+    return currentSite === 'sicko' ? Math.max(1, connectedSites().length) * 1000 : 1000;
+  }
+
   // Empty-state copy — Sicko Mode explains its all-games-in-a-day gate.
   function emptyMsg(): string {
     return currentSite === 'sicko'
@@ -572,7 +578,7 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
 
   function buildDayList(days: {date:string;score:number;rawScores?:number[]|null}[], username: string) {
     const rows = [...days].reverse().map(d => {
-      const tc = totalTierClass(d.score, 1000);
+      const tc = totalTierClass(d.score, dayMax());
       const dots = (d.rawScores || []).map(r => `<div class="mini-dot ${dotClass(r)}"></div>`).join('');
       const icons = mapsEnabled()
         ? `<button class="day-map-icon" onclick="event.stopPropagation();openMapReview('${d.date}')" title="View on map">📍</button>` +
@@ -766,7 +772,7 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
         if (e.played) { playedRank++; rankStr = playedRank===1?'🥇':playedRank===2?'🥈':playedRank===3?'🥉':`${playedRank}`; }
         else rankStr = '—';
         const initials = e.username.split(/\s+/).map((w:string)=>w[0]).join('').slice(0,2).toUpperCase();
-        const tClass = e.total!==null?totalTierClass(isToday?e.total:e.avg??0,1000):'';
+        const tClass = e.total!==null?totalTierClass(isToday?e.total:e.avg??0,dayMax()):'';
         let breakdownContent = '';
         if (e.played) {
           if (isToday) { const raw=e.days[0]?.rawScores; if(raw&&raw.length===5)breakdownContent=buildTodayBreakdown(raw,start,groupAvgs,e.username); }
@@ -776,7 +782,7 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
         const hasBreak = breakdownContent.length>0;
         let scoreHtml: string;
         if (e.played) {
-          if (isToday) scoreHtml=`<div class="score-col"><div class="score-main ${tClass}">${e.total}</div><div class="score-sub">/ 1,000</div></div>`;
+          if (isToday) scoreHtml=`<div class="score-col"><div class="score-main ${tClass}">${(e.total??0).toLocaleString()}</div><div class="score-sub">/ ${dayMax().toLocaleString()}</div></div>`;
           else scoreHtml=`<div class="score-col"><div class="score-main ${tClass}">${(e.total??0).toLocaleString()}</div><div class="score-sub">${e.count} day${e.count!==1?'s':''} · avg ${e.avg}</div></div>`;
         } else {
           scoreHtml=`<div class="score-col no-played">Not played</div>`;
