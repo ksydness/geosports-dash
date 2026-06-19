@@ -42,25 +42,39 @@ Token format: classic PAT with `repo` scope. Kenny provides when needed.
 ## Database Schema (Supabase)
 
 ```sql
-CREATE TABLE groups (
+CREATE TABLE groups (                  -- one row per group code (shared identity)
   group_code TEXT PRIMARY KEY,
   group_name TEXT NOT NULL,
-  session_token TEXT NOT NULL,  -- AES-256-GCM encrypted
+  session_token TEXT,            -- LEGACY geosports token mirror; nullable. Per-site
+                                 -- tokens now live in group_sites. Kept for /api/results.
   email TEXT,
   active BOOLEAN NOT NULL DEFAULT true,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   last_synced_at TIMESTAMPTZ,
-  last_backfilled_at TIMESTAMPTZ  -- throttles the public re-backfill endpoint
+  last_backfilled_at TIMESTAMPTZ
+);
+
+CREATE TABLE group_sites (             -- one row per (group, connected game)
+  group_code TEXT NOT NULL REFERENCES groups(group_code) ON DELETE CASCADE,
+  site TEXT NOT NULL,                  -- 'geosports' | 'geohistory' | 'geofooty'
+  session_token TEXT NOT NULL,         -- AES-256-GCM encrypted, per site
+  active BOOLEAN NOT NULL DEFAULT true,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_synced_at TIMESTAMPTZ,
+  last_backfilled_at TIMESTAMPTZ,
+  PRIMARY KEY (group_code, site)
 );
 
 CREATE TABLE scores (
   group_code TEXT NOT NULL REFERENCES groups(group_code) ON DELETE CASCADE,
+  site TEXT NOT NULL DEFAULT 'geosports',
   date DATE NOT NULL,
-  username TEXT NOT NULL,
+  user_id TEXT NOT NULL,        -- stable UUID, SHARED across all three games
+  username TEXT NOT NULL,       -- mutable display label (latest write wins)
   score INTEGER NOT NULL,
   raw_scores JSONB,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  PRIMARY KEY (group_code, date, username)
+  PRIMARY KEY (group_code, site, date, user_id)
 );
 
 CREATE TABLE answers (
@@ -69,6 +83,28 @@ CREATE TABLE answers (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 ```
+
+## Multi-site (GeoSports + GeoHistory + GeoFooty)
+
+GeoHistory (geohistory.gg) and GeoFooty (geofooty.app) are the same backend as
+GeoSports: identical API shape (`/api/groups/{code}`, `/api/v2/questions`,
+`/api/auth/get-session`), the SAME group codes, and the SAME `userId`s. Only the
+domain + session cookie differ per site. `lib/sites.ts` is the registry (base URL,
+cookie name candidates, label/accent/emoji).
+
+- **Auth is per-site**: each domain sets its own session cookie. `lib/geosports.ts`
+  `siteFetch()` tries each candidate cookie name (`__Secure-<site>.session_token`,
+  falling back to the geosports prefix) and memoises the one that authenticates,
+  so a wrong prefix self-corrects instead of being mistaken for an expired token.
+- **Registration** (`/api/register`) takes a `{ tokens: { site: token } }` map —
+  one site is enough; more can be added later from the dashboard's ＋ / connect
+  modal (same endpoint, upserts per `group_code+site`). Legacy `{ session_token }`
+  still works and is treated as geosports.
+- **Dashboard**: a site switcher sits above the 5 tabs. Selecting a site filters
+  the score array to that site; **Sicko Mode** (shown when ≥2 sites connected)
+  sums each player's daily score across sites by `user_id` (totals only — raw
+  per-question scores aren't comparable across games). Maps / answer-key / practice
+  game are GeoSports-only and gated to that view.
 
 ## Project Structure
 
