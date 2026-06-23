@@ -602,7 +602,7 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
   // Sicko Mode breakdown: shows what each connected game contributed to the day's
   // combined total. Per-question rawScores aren't comparable across games, so this
   // is per-game totals only, each as a bar against that game's 1,000-pt perfect day.
-  function buildSickoBreakdown(siteScores: {site:string;score:number}[]) {
+  function buildSickoBreakdown(siteScores: {site:string;score:number}[], label = 'Score by game') {
     if (!siteScores || !siteScores.length) return '';
     const rows = siteScores.map(ss => {
       const info = SITE_INFO[ss.site];
@@ -615,7 +615,22 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
         <div class="sicko-pts ${tc}">${ss.score.toLocaleString()}</div>
       </div>`;
     }).join('');
-    return `<div class="breakdown-inner"><div class="breakdown-section-label">Score by game</div>${rows}</div>`;
+    return `<div class="breakdown-inner"><div class="breakdown-section-label">${esc(label)}</div>${rows}</div>`;
+  }
+
+  // Average each game's daily contribution across the period's combined days.
+  // Every Sicko day already includes all connected games, so dayCount is the
+  // denominator for each game's average.
+  function computeSickoAvgs(days: {siteScores?:{site:string;score:number}[]}[]) {
+    const sums: Record<string, number> = {};
+    let n = 0;
+    for (const d of days) {
+      if (!d.siteScores || !d.siteScores.length) continue;
+      n++;
+      for (const ss of d.siteScores) sums[ss.site] = (sums[ss.site] || 0) + ss.score;
+    }
+    if (!n) return null;
+    return { n, avgs: SITE_ORDER.filter(s => s in sums).map(s => ({ site: s, score: Math.round(sums[s] / n) })) };
   }
 
   function buildDayList(days: {date:string;score:number;rawScores?:number[]|null}[], username: string) {
@@ -822,7 +837,10 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
             else { const raw=e.days[0]?.rawScores; if(raw&&raw.length===5)breakdownContent=buildTodayBreakdown(raw,start,groupAvgs,e.username); }
           }
           else if (tab==='week') { if(e.days.length>0)breakdownContent=buildDayList(e.days,e.username); }
-          else { const qAvgs=computeQAvgs(e.days); if(qAvgs){const n=e.days.filter(d=>d.rawScores&&d.rawScores.length===5).length;breakdownContent=buildQAvgBreakdown(qAvgs,n);} }
+          else {
+            if (currentSite==='sicko') { const sa=computeSickoAvgs(e.days); if(sa)breakdownContent=buildSickoBreakdown(sa.avgs,`Avg per game · ${sa.n} day${sa.n!==1?'s':''}`); }
+            else { const qAvgs=computeQAvgs(e.days); if(qAvgs){const n=e.days.filter(d=>d.rawScores&&d.rawScores.length===5).length;breakdownContent=buildQAvgBreakdown(qAvgs,n);} }
+          }
         }
         const hasBreak = breakdownContent.length>0;
         let scoreHtml: string;
