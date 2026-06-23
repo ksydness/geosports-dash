@@ -168,7 +168,7 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
   const Q_MULTIPLIERS = [1, 1, 2, 3, 3];
   const Q_MAX_PTS     = [100, 100, 200, 300, 300];
 
-  type Row = {date:string;site?:string;userId?:string;username:string;score:number;rawScores?:number[]};
+  type Row = {date:string;site?:string;userId?:string;username:string;score:number;rawScores?:number[];siteScores?:{site:string;score:number}[]};
   let masterScores: Row[] = [];        // every site's rows, as returned by the API
   let sitesMeta: SiteMeta[] = [];      // which sites are connected + their state
   let currentSite = 'geosports';       // active view: a site key or 'sicko'
@@ -210,18 +210,25 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
   // player with no complete day in the period simply doesn't appear.
   function buildCombined(rows: Row[]): Row[] {
     const required = connectedSites().length; // all connected games (3 when all 3 linked)
-    const acc: Record<string, { row: Row; sites: Set<string> }> = {};
+    const acc: Record<string, { row: Row; sites: Set<string>; perSite: Record<string, number> }> = {};
     for (const r of rows) {
       if (!r.userId) continue;
       const key = `${r.date}|${r.userId}`;
       if (!acc[key]) {
-        acc[key] = { row: { date: r.date, site: 'sicko', userId: r.userId, username: r.username, score: 0 }, sites: new Set() };
+        acc[key] = { row: { date: r.date, site: 'sicko', userId: r.userId, username: r.username, score: 0 }, sites: new Set(), perSite: {} };
       }
+      const site = r.site || 'geosports';
       acc[key].row.score += r.score;
       acc[key].row.username = r.username; // latest label; canonicalizeNames refines further
-      acc[key].sites.add(r.site || 'geosports');
+      acc[key].sites.add(site);
+      acc[key].perSite[site] = (acc[key].perSite[site] || 0) + r.score;
     }
-    return Object.values(acc).filter(a => a.sites.size >= required).map(a => a.row);
+    return Object.values(acc).filter(a => a.sites.size >= required).map(a => {
+      // Attach per-site sub-scores in canonical order so the combined entry can be
+      // expanded to show what each game contributed to the day's total.
+      a.row.siteScores = SITE_ORDER.filter(s => s in a.perSite).map(s => ({ site: s, score: a.perSite[s] }));
+      return a.row;
+    });
   }
 
   // Rebuild the active-view score array + prompt cache, then re-render.
@@ -592,6 +599,25 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
     return `<div class="breakdown-inner"><div class="dot-row">${dots}</div>${bars}${mapBtn}</div>`;
   }
 
+  // Sicko Mode breakdown: shows what each connected game contributed to the day's
+  // combined total. Per-question rawScores aren't comparable across games, so this
+  // is per-game totals only, each as a bar against that game's 1,000-pt perfect day.
+  function buildSickoBreakdown(siteScores: {site:string;score:number}[]) {
+    if (!siteScores || !siteScores.length) return '';
+    const rows = siteScores.map(ss => {
+      const info = SITE_INFO[ss.site];
+      if (!info) return '';
+      const pct = Math.max(2, Math.min(100, Math.round((ss.score / 1000) * 100)));
+      const tc = totalTierClass(ss.score, 1000);
+      return `<div class="sicko-row">
+        <div class="sicko-game"><span class="sicko-emoji">${info.emoji}</span><span class="sicko-name">${esc(info.label)}</span></div>
+        <div class="sicko-bar-track"><div class="sicko-bar-fill" style="width:${pct}%;background:${info.accent}"></div></div>
+        <div class="sicko-pts ${tc}">${ss.score.toLocaleString()}</div>
+      </div>`;
+    }).join('');
+    return `<div class="breakdown-inner"><div class="breakdown-section-label">Score by game</div>${rows}</div>`;
+  }
+
   function buildDayList(days: {date:string;score:number;rawScores?:number[]|null}[], username: string) {
     const rows = [...days].reverse().map(d => {
       const tc = totalTierClass(d.score, dayMax());
@@ -740,14 +766,14 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
     const isToday = tab === 'today';
     const filtered = allScores.filter(s => s.date >= start && s.date <= end);
     const allUsers = [...new Set(allScores.map(s => s.username))].sort();
-    type UserBucket = { total:number;count:number;best:number;days:{date:string;score:number;rawScores?:number[]|null}[] };
+    type UserBucket = { total:number;count:number;best:number;days:{date:string;score:number;rawScores?:number[]|null;siteScores?:{site:string;score:number}[]}[] };
     const byUser: Record<string, UserBucket> = {};
     filtered.forEach(s => {
       if (!byUser[s.username]) byUser[s.username]={total:0,count:0,best:0,days:[]};
       byUser[s.username].total += s.score;
       byUser[s.username].count++;
       if (s.score > byUser[s.username].best) byUser[s.username].best = s.score;
-      byUser[s.username].days.push({date:s.date,score:s.score,rawScores:s.rawScores||null});
+      byUser[s.username].days.push({date:s.date,score:s.score,rawScores:s.rawScores||null,siteScores:s.siteScores});
     });
     Object.values(byUser).forEach(u => u.days.sort((a,b)=>b.date.localeCompare(a.date)));
     let groupAvgs: number[] | null = null;
@@ -791,7 +817,10 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
         const tClass = e.total!==null?totalTierClass(isToday?e.total:e.avg??0,dayMax()):'';
         let breakdownContent = '';
         if (e.played) {
-          if (isToday) { const raw=e.days[0]?.rawScores; if(raw&&raw.length===5)breakdownContent=buildTodayBreakdown(raw,start,groupAvgs,e.username); }
+          if (isToday) {
+            if (currentSite==='sicko') { const ss=e.days[0]?.siteScores; if(ss&&ss.length)breakdownContent=buildSickoBreakdown(ss); }
+            else { const raw=e.days[0]?.rawScores; if(raw&&raw.length===5)breakdownContent=buildTodayBreakdown(raw,start,groupAvgs,e.username); }
+          }
           else if (tab==='week') { if(e.days.length>0)breakdownContent=buildDayList(e.days,e.username); }
           else { const qAvgs=computeQAvgs(e.days); if(qAvgs){const n=e.days.filter(d=>d.rawScores&&d.rawScores.length===5).length;breakdownContent=buildQAvgBreakdown(qAvgs,n);} }
         }
@@ -1432,6 +1461,14 @@ const CSS = `
   .day-mini-dots { display:flex; gap:4px; align-items:center; }
   .mini-dot { width:9px; height:9px; border-radius:50%; flex-shrink:0; }
   .breakdown-section-label { font-size:10px; font-weight:600; letter-spacing:0.07em; text-transform:uppercase; color:var(--muted); margin-bottom:10px; }
+  .sicko-row { display:flex; align-items:center; gap:10px; margin-bottom:10px; }
+  .sicko-row:last-child { margin-bottom:0; }
+  .sicko-game { display:flex; align-items:center; gap:6px; width:104px; flex-shrink:0; }
+  .sicko-emoji { font-size:13px; }
+  .sicko-name { font-size:12px; font-weight:600; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .sicko-bar-track { flex:1; height:10px; background:rgba(255,255,255,0.06); border-radius:5px; overflow:hidden; }
+  .sicko-bar-fill { height:100%; border-radius:5px; transition:width 0.4s ease; }
+  .sicko-pts { font-size:13px; font-weight:700; font-variant-numeric:tabular-nums; width:46px; text-align:right; flex-shrink:0; }
   .stats-records { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:14px; }
   .record-card { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:14px 14px 12px; }
   .record-emoji { font-size:18px; margin-bottom:6px; }
