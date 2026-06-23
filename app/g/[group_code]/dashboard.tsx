@@ -602,17 +602,19 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
   // Sicko Mode breakdown: shows what each connected game contributed to the day's
   // combined total. Per-question rawScores aren't comparable across games, so this
   // is per-game totals only, each as a bar against that game's 1,000-pt perfect day.
-  function buildSickoBreakdown(siteScores: {site:string;score:number}[], label = 'Score by game') {
+  function buildSickoBreakdown(siteScores: {site:string;score:number}[], label = 'Score by game', groupAvgs: Record<string, number> | null = null) {
     if (!siteScores || !siteScores.length) return '';
     const rows = siteScores.map(ss => {
       const info = SITE_INFO[ss.site];
       if (!info) return '';
       const pct = Math.max(2, Math.min(100, Math.round((ss.score / 1000) * 100)));
       const tc = totalTierClass(ss.score, 1000);
+      const grp = groupAvgs && groupAvgs[ss.site] != null
+        ? `<div class="sicko-grp">grp ${groupAvgs[ss.site].toLocaleString()}</div>` : '';
       return `<div class="sicko-row">
         <div class="sicko-game"><span class="sicko-emoji">${info.emoji}</span><span class="sicko-name">${esc(info.label)}</span></div>
         <div class="sicko-bar-track"><div class="sicko-bar-fill" style="width:${pct}%;background:${info.accent}"></div></div>
-        <div class="sicko-pts ${tc}">${ss.score.toLocaleString()}</div>
+        <div class="sicko-pts-col"><div class="sicko-pts ${tc}">${ss.score.toLocaleString()}</div>${grp}</div>
       </div>`;
     }).join('');
     return `<div class="breakdown-inner"><div class="breakdown-section-label">${esc(label)}</div>${rows}</div>`;
@@ -633,10 +635,18 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
     return { n, avgs: SITE_ORDER.filter(s => s in sums).map(s => ({ site: s, score: Math.round(sums[s] / n) })) };
   }
 
-  function buildDayList(days: {date:string;score:number;rawScores?:number[]|null}[], username: string) {
+  function buildDayList(days: {date:string;score:number;rawScores?:number[]|null;siteScores?:{site:string;score:number}[]}[], username: string) {
     const rows = [...days].reverse().map(d => {
       const tc = totalTierClass(d.score, dayMax());
       const dots = (d.rawScores || []).map(r => `<div class="mini-dot ${dotClass(r)}"></div>`).join('');
+      // Sicko Mode: combined days have no per-question dots, so show the per-game
+      // split that adds up to the day's total instead.
+      const siteSplit = (d.siteScores && d.siteScores.length)
+        ? `<div class="day-sites">${d.siteScores.map(ss => {
+            const info = SITE_INFO[ss.site];
+            return info ? `<span class="day-site" title="${esc(info.label)}"><span class="day-site-emoji">${info.emoji}</span><span class="day-site-pts" style="color:${info.accent}">${ss.score.toLocaleString()}</span></span>` : '';
+          }).join('')}</div>`
+        : '';
       const icons = mapsEnabled()
         ? `<button class="day-map-icon" onclick="event.stopPropagation();openMapReview('${d.date}')" title="View on map">📍</button>` +
           `<button class="day-map-icon" onclick="event.stopPropagation();openUserMap('${d.date}',${attrJs(username)})" title="See this player\u2019s distance rings">\ud83c\udfaf</button>`
@@ -645,6 +655,7 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
         <div class="day-date-lbl">${formatDisplayDate(d.date)}</div>
         <div class="day-score-num ${tc}">${d.score}</div>
         ${dots ? `<div class="day-mini-dots">${dots}</div>` : ''}
+        ${siteSplit}
         ${icons}
       </div>`;
     }).join('');
@@ -792,12 +803,22 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
     });
     Object.values(byUser).forEach(u => u.days.sort((a,b)=>b.date.localeCompare(a.date)));
     let groupAvgs: number[] | null = null;
+    let sickoGroupAvgs: Record<string, number> | null = null;
     if (isToday) {
       const withRaw = allScores.filter(s=>s.date===start&&s.rawScores&&s.rawScores.length===5);
       if (withRaw.length>0) {
         const sums=[0,0,0,0,0];
         withRaw.forEach(s=>s.rawScores!.forEach((r,i)=>sums[i]+=r));
         groupAvgs = sums.map(v=>Math.round(v/withRaw.length));
+      }
+      if (currentSite==='sicko') {
+        // Per-game group average across everyone who completed today's Sicko day.
+        const withSites = allScores.filter(s=>s.date===start&&s.siteScores&&s.siteScores.length);
+        if (withSites.length>0) {
+          const gs:Record<string,number>={}, gc:Record<string,number>={};
+          withSites.forEach(s=>s.siteScores!.forEach(ss=>{gs[ss.site]=(gs[ss.site]||0)+ss.score;gc[ss.site]=(gc[ss.site]||0)+1;}));
+          sickoGroupAvgs={}; Object.keys(gs).forEach(k=>sickoGroupAvgs![k]=Math.round(gs[k]/gc[k]));
+        }
       }
     }
     const entries = allUsers.map(u => ({
@@ -833,7 +854,7 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
         let breakdownContent = '';
         if (e.played) {
           if (isToday) {
-            if (currentSite==='sicko') { const ss=e.days[0]?.siteScores; if(ss&&ss.length)breakdownContent=buildSickoBreakdown(ss); }
+            if (currentSite==='sicko') { const ss=e.days[0]?.siteScores; if(ss&&ss.length)breakdownContent=buildSickoBreakdown(ss,'Score by game',sickoGroupAvgs); }
             else { const raw=e.days[0]?.rawScores; if(raw&&raw.length===5)breakdownContent=buildTodayBreakdown(raw,start,groupAvgs,e.username); }
           }
           else if (tab==='week') { if(e.days.length>0)breakdownContent=buildDayList(e.days,e.username); }
@@ -1486,7 +1507,13 @@ const CSS = `
   .sicko-name { font-size:12px; font-weight:600; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .sicko-bar-track { flex:1; height:10px; background:rgba(255,255,255,0.06); border-radius:5px; overflow:hidden; }
   .sicko-bar-fill { height:100%; border-radius:5px; transition:width 0.4s ease; }
-  .sicko-pts { font-size:13px; font-weight:700; font-variant-numeric:tabular-nums; width:46px; text-align:right; flex-shrink:0; }
+  .sicko-pts-col { width:52px; text-align:right; flex-shrink:0; }
+  .sicko-pts { font-size:13px; font-weight:700; font-variant-numeric:tabular-nums; }
+  .sicko-grp { font-size:9px; color:var(--muted); margin-top:2px; }
+  .day-sites { display:flex; gap:9px; align-items:center; margin-left:auto; }
+  .day-site { display:inline-flex; align-items:center; gap:3px; }
+  .day-site-emoji { font-size:11px; }
+  .day-site-pts { font-size:11px; font-weight:700; font-variant-numeric:tabular-nums; }
   .stats-records { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:14px; }
   .record-card { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:14px 14px 12px; }
   .record-emoji { font-size:18px; margin-bottom:6px; }
