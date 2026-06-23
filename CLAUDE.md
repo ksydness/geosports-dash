@@ -116,6 +116,8 @@ app/
   g/[group_code]/
     page.tsx                      # Server component — passes group_code to dashboard
     dashboard.tsx                 # Client component — full dashboard UI (all tabs)
+  g/demo/
+    page.tsx                      # Public demo dashboard (uses lib/demo-data, no real group)
   api/
     register/route.ts             # POST: register a group, kick off 30-day backfill
     scores/[group_code]/route.ts  # GET: return scores + auto-sync if stale >10min
@@ -128,6 +130,8 @@ lib/
   geosports.ts  # GeoSports API client (fetchGroupInfo, fetchDayScores, fetchQuestions, AuthError)
   sync.ts       # Shared sync logic (syncGroup, upsertDayScores) — deactivates group on AuthError
   dates.ts      # Eastern-time date helpers (todayET, etDateMinusDays)
+  scoring.ts    # Local replica of GeoSports' distance→points curve (haversineMiles, milesToRawScore, scoreTier, greatCirclePoints, MULTIPLIERS) — powers the easter-egg practice game without calling the live API
+  demo-data.ts  # Deterministic mock scores (generateDemoData, DEMO_GROUP_NAME) for the /g/demo dashboard
 ```
 
 ## Key Architecture Decisions
