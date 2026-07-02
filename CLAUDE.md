@@ -62,6 +62,7 @@ CREATE TABLE group_sites (             -- one row per (group, connected game)
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   last_synced_at TIMESTAMPTZ,
   last_backfilled_at TIMESTAMPTZ,
+  expires_at TIMESTAMPTZ,               -- token expiry from /api/auth/get-session, refreshed each sync
   PRIMARY KEY (group_code, site)
 );
 

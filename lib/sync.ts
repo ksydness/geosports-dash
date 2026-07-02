@@ -1,6 +1,6 @@
 import { supabase } from './supabase';
 import { decrypt } from './crypto';
-import { fetchDayScores, fetchGroupDay, AuthError, GeoScoreEntry } from './geosports';
+import { fetchDayScores, fetchGroupDay, fetchSessionExpiry, AuthError, GeoScoreEntry } from './geosports';
 import { Site } from './sites';
 import { todayET, etDateMinusDays } from './dates';
 
@@ -83,9 +83,15 @@ export async function backfillGroup(
     if (err instanceof AuthError) await deactivateSite(groupCode, site);
     throw err;
   }
+  const expiresAt = await fetchSessionExpiry(sessionToken, site);
   await supabase
     .from('group_sites')
-    .update({ last_synced_at: new Date().toISOString() })
+    .update({
+      last_synced_at: new Date().toISOString(),
+      // Best-effort: only write when the site answered, so a transient
+      // failure never nulls out a previously-recorded expiry.
+      ...(expiresAt ? { expires_at: expiresAt } : {}),
+    })
     .eq('group_code', groupCode)
     .eq('site', site);
   console.log(`Backfill complete for ${groupCode}/${site}: ${written} rows over ${days} days`);
@@ -120,9 +126,15 @@ export async function syncGroup(
     if (err instanceof AuthError) await deactivateSite(groupCode, site);
     throw err;
   }
+  const expiresAt = await fetchSessionExpiry(token, site);
   await supabase
     .from('group_sites')
-    .update({ last_synced_at: new Date().toISOString() })
+    .update({
+      last_synced_at: new Date().toISOString(),
+      // Best-effort: only write when the site answered, so a transient
+      // failure never nulls out a previously-recorded expiry.
+      ...(expiresAt ? { expires_at: expiresAt } : {}),
+    })
     .eq('group_code', groupCode)
     .eq('site', site);
   // The group name is shared across sites — keep the groups row fresh.

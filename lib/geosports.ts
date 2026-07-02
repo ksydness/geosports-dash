@@ -147,3 +147,24 @@ export async function fetchQuestions(site: Site = DEFAULT_SITE) {
   if (!res.ok) return null;
   return res.json();
 }
+
+/**
+ * Ask a site how long a session token lives. Returns the ISO `expiresAt`
+ * string from /api/auth/get-session, or null on any failure (never throws —
+ * expiry tracking is best-effort and must not break a sync).
+ * Better-auth appears to slide expiry forward on authenticated use, so this
+ * also doubles as a keep-alive signal: watch expires_at advance day over day.
+ */
+export async function fetchSessionExpiry(
+  sessionToken: string,
+  site: Site = DEFAULT_SITE
+): Promise<string | null> {
+  try {
+    const res = await siteFetch(site, sessionToken, '/api/auth/get-session');
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data?.session?.expiresAt ?? null;
+  } catch {
+    return null;
+  }
+}
