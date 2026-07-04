@@ -178,6 +178,7 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
   let currentTab = 'today';
   let lastFetched: Date | null = null;
   let openEntry: string | null = null;
+  let periodOffset = 0;                // 0 = current day/week/month; N = N periods back
 
   // Sites the group is connected to, in canonical order.
   function connectedSites(): string[] {
@@ -405,6 +406,7 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
   // ── Exposed globals ───────────────────────────────────────────────────────────
 
   (window as any).switchTab = function(tab: string) {
+    if (tab !== currentTab) periodOffset = 0; // each tab starts at the current period
     currentTab = tab;
     openEntry = null;
     document.querySelectorAll('.tab').forEach(t => {
@@ -412,6 +414,13 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
     });
     if (tab === 'stats') renderStats();
     else renderTab(tab);
+  };
+
+  // Step the Today/Week/Month window back (+1) or forward (-1); 0 resets to now.
+  (window as any).stepPeriod = function(delta: number) {
+    periodOffset = delta === 0 ? 0 : Math.max(0, periodOffset + delta);
+    openEntry = null;
+    renderTab(currentTab);
   };
 
   (window as any).toggleBreakdown = function(username: string) {
@@ -518,17 +527,29 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
   function getDateRange(tab: string) {
     const todayStr = todayETStr();
     const today = new Date(todayStr + 'T00:00:00');
-    if (tab === 'today') return { start: todayStr, end: todayStr, label: todayStr };
+    if (tab === 'today') {
+      const d = new Date(today);
+      d.setDate(d.getDate() - periodOffset);
+      const s = toDateStr(d);
+      return { start: s, end: s, label: s };
+    }
     if (tab === 'week') {
       const d = new Date(today);
       const dow = d.getDay();
-      d.setDate(d.getDate() + (dow === 0 ? -6 : 1 - dow));
+      d.setDate(d.getDate() + (dow === 0 ? -6 : 1 - dow) - periodOffset * 7);
       const s = toDateStr(d);
-      return { start: s, end: todayStr, label: `${s} – ${todayStr}` };
+      const e = new Date(d);
+      e.setDate(e.getDate() + 6);
+      const endStr = periodOffset === 0 ? todayStr : toDateStr(e);
+      return { start: s, end: endStr, label: `${s} – ${endStr}` };
     }
     if (tab === 'month') {
-      const s = toDateStr(new Date(today.getFullYear(), today.getMonth(), 1));
-      return { start: s, end: todayStr, label: `${s} – ${todayStr}` };
+      const first = new Date(today.getFullYear(), today.getMonth() - periodOffset, 1);
+      const s = toDateStr(first);
+      const endStr = periodOffset === 0
+        ? todayStr
+        : toDateStr(new Date(first.getFullYear(), first.getMonth() + 1, 0));
+      return { start: s, end: endStr, label: `${s} – ${endStr}` };
     }
     const dates = allScores.map(s => s.date).sort();
     const s = dates[0] || '2020-01-01';
@@ -832,7 +853,19 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
     const totalDays = isToday?null:[...new Set(filtered.map(s=>s.date))].length;
     const avgScore = played.length?Math.round(played.reduce((s,e)=>s+(e.avg??0),0)/played.length):null;
     const mapBtn = `<button class="map-review-btn" onclick="openMapReview('${start}')">🗺 Map</button>`;
-    let html = `<div class="period-label-row"><span class="period-label">${label}</span>${isToday && mapsEnabled() ? mapBtn : ''}</div>`;
+    // ‹ › period navigation (Today/Week/Month). Back stops once the window
+    // start is at or before the earliest synced score; forward stops at now.
+    const navigable = tab === 'today' || tab === 'week' || tab === 'month';
+    const earliest = allScores.length ? allScores.reduce((m, s) => (s.date < m ? s.date : m), allScores[0].date) : null;
+    const canBack = navigable && earliest !== null && start > earliest;
+    const periodNoun = tab === 'today' ? 'day' : tab;
+    const nav = navigable ? `<span class="period-nav">
+        ${periodOffset > 0 ? `<button class="period-now" onclick="stepPeriod(0)">${tab === 'today' ? 'Today' : 'Current'}</button>` : ''}
+        <button class="period-arrow" ${canBack ? '' : 'disabled'} aria-label="Previous ${periodNoun}" onclick="stepPeriod(1)">‹</button>
+        <button class="period-arrow" ${periodOffset > 0 ? '' : 'disabled'} aria-label="Next ${periodNoun}" onclick="stepPeriod(-1)">›</button>
+      </span>` : '';
+    const showMap = isToday && periodOffset === 0 && mapsEnabled();
+    let html = `<div class="period-label-row"><span class="period-label">${label}</span><span class="period-controls">${showMap ? mapBtn : ''}${nav}</span></div>`;
     if (!isToday && played.length>0) {
       html += `<div class="stats-strip">
         <div class="stat"><div class="stat-val">${totalDays}</div><div class="stat-lbl">Days</div></div>
@@ -1545,6 +1578,13 @@ const CSS = `
 
   /* ── Period label row ── */
   .period-label-row { display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; }
+  .period-controls { display:flex; align-items:center; gap:8px; }
+  .period-nav { display:flex; align-items:center; gap:4px; }
+  .period-arrow { background:none; border:1px solid var(--border); border-radius:6px; color:var(--muted); width:26px; height:24px; padding:0; font-size:14px; line-height:1; cursor:pointer; transition:border-color 0.15s,color 0.15s; }
+  .period-arrow:hover:not(:disabled) { border-color:var(--accent); color:var(--accent); }
+  .period-arrow:disabled { opacity:0.35; cursor:default; }
+  .period-now { background:none; border:1px solid var(--border); border-radius:6px; color:var(--muted); font-size:11px; font-weight:600; padding:4px 8px; cursor:pointer; transition:border-color 0.15s,color 0.15s; }
+  .period-now:hover { border-color:var(--accent); color:var(--accent); }
   .map-review-btn { background:rgba(59,130,246,0.12); border:1px solid rgba(59,130,246,0.3); border-radius:6px; color:#3b82f6; font-size:11px; font-weight:600; padding:4px 10px; cursor:pointer; transition:background 0.15s; }
   .map-review-btn:hover { background:rgba(59,130,246,0.22); }
   .user-map-btn { display:block; width:100%; margin-top:14px; background:rgba(59,130,246,0.12); border:1px solid rgba(59,130,246,0.3); border-radius:8px; color:#3b82f6; font-size:12px; font-weight:600; padding:9px 10px; cursor:pointer; transition:background 0.15s; }
