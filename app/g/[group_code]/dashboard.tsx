@@ -859,13 +859,15 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
     const earliest = allScores.length ? allScores.reduce((m, s) => (s.date < m ? s.date : m), allScores[0].date) : null;
     const canBack = navigable && earliest !== null && start > earliest;
     const periodNoun = tab === 'today' ? 'day' : tab;
-    const nav = navigable ? `<span class="period-nav">
-        ${periodOffset > 0 ? `<button class="period-now" onclick="stepPeriod(0)">${tab === 'today' ? 'Today' : 'Current'}</button>` : ''}
+    // Arrows flank the date label: ‹ 2026-07-04 › [Today]
+    const left = navigable ? `<span class="period-nav">
         <button class="period-arrow" ${canBack ? '' : 'disabled'} aria-label="Previous ${periodNoun}" onclick="stepPeriod(1)">‹</button>
+        <span class="period-label">${label}</span>
         <button class="period-arrow" ${periodOffset > 0 ? '' : 'disabled'} aria-label="Next ${periodNoun}" onclick="stepPeriod(-1)">›</button>
-      </span>` : '';
+        ${periodOffset > 0 ? `<button class="period-now" onclick="stepPeriod(0)">${tab === 'today' ? 'Today' : 'Current'}</button>` : ''}
+      </span>` : `<span class="period-label">${label}</span>`;
     const showMap = isToday && periodOffset === 0 && mapsEnabled();
-    let html = `<div class="period-label-row"><span class="period-label">${label}</span><span class="period-controls">${showMap ? mapBtn : ''}${nav}</span></div>`;
+    let html = `<div class="period-label-row">${left}${showMap ? mapBtn : ''}</div>`;
     if (!isToday && played.length>0) {
       html += `<div class="stats-strip">
         <div class="stat"><div class="stat-val">${totalDays}</div><div class="stat-lbl">Days</div></div>
@@ -1578,8 +1580,8 @@ const CSS = `
 
   /* ── Period label row ── */
   .period-label-row { display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; }
-  .period-controls { display:flex; align-items:center; gap:8px; }
-  .period-nav { display:flex; align-items:center; gap:4px; }
+  .period-nav { display:flex; align-items:center; gap:6px; }
+  .period-nav .period-label { margin-bottom:0; }
   .period-arrow { background:none; border:1px solid var(--border); border-radius:6px; color:var(--muted); width:26px; height:24px; padding:0; font-size:14px; line-height:1; cursor:pointer; transition:border-color 0.15s,color 0.15s; }
   .period-arrow:hover:not(:disabled) { border-color:var(--accent); color:var(--accent); }
   .period-arrow:disabled { opacity:0.35; cursor:default; }
