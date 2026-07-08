@@ -141,7 +141,10 @@ export default function Home() {
               value={email}
               onChange={e => setEmail(e.target.value)}
             />
-            <p style={styles.hint}>Tokens are stored encrypted and only used to sync your group&apos;s scores.</p>
+            <p style={styles.hint}>
+              Tokens are stored encrypted and only used to sync your group&apos;s scores. See our{' '}
+              <a href="/privacy" style={styles.hintLink}>privacy policy</a>.
+            </p>
           </div>
 
           {error && <div style={styles.errorBox}>{error}</div>}
@@ -156,9 +159,14 @@ export default function Home() {
         Scores sync automatically. Share the link with your group once it&apos;s ready.
       </p>
 
-      <a href="/g/demo" style={styles.demoLink}>
-        👀 See a demo first
-      </a>
+      <div style={{ marginTop: 14, display: 'flex', gap: 20 }}>
+        <a href="/g/demo" style={{ ...styles.demoLink, marginTop: 0 }}>
+          👀 See a demo first
+        </a>
+        <a href="/privacy" style={{ ...styles.demoLink, marginTop: 0 }}>
+          Privacy &amp; Terms
+        </a>
+      </div>
     </div>
   );
 }
@@ -181,6 +189,7 @@ const styles: Record<string, React.CSSProperties> = {
   label: { display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 6 },
   input: { width: '100%', background: '#080e1a', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, padding: '10px 14px', color: '#f0f4ff', fontSize: 14, outline: 'none' },
   hint: { fontSize: 11, color: '#6b7a99', marginTop: 5 },
+  hintLink: { color: '#6b7a99', textDecoration: 'underline' },
   siteCard: { background: '#0b1320', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 10, padding: '12px 12px 14px', marginBottom: 10 },
   siteHead: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
   siteName: { fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center' },
