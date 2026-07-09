@@ -78,6 +78,18 @@ CREATE TABLE scores (
   PRIMARY KEY (group_code, site, date, user_id)
 );
 
+CREATE TABLE score_overrides (      -- manual corrections (e.g. GeoSports answer-key errors)
+  group_code TEXT NOT NULL REFERENCES groups(group_code) ON DELETE CASCADE,
+  site TEXT NOT NULL DEFAULT 'geosports',
+  date DATE NOT NULL,
+  user_id TEXT NOT NULL,
+  raw_scores JSONB,        -- corrected per-question raw array
+  score INTEGER NOT NULL,  -- corrected daily total
+  reason TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (group_code, site, date, user_id)
+);
+
 CREATE TABLE answers (
   date DATE PRIMARY KEY,
   guesses JSONB NOT NULL,  -- cached daily answer key from GeoSports guess endpoint
@@ -137,6 +149,7 @@ lib/
 
 ## Key Architecture Decisions
 
+- **Score overrides**: `score_overrides` rows are merged into `/api/scores` responses at read time (replacing `score`/`raw_scores`, adding `corrected: true`). Syncs keep writing GeoSports' values to `scores`, so corrections are never clobbered. Rows are inserted manually (via Claude/SQL) after verifying a player was scored against a wrong answer key.
 - **Stale-while-revalidate sync**: `/api/scores` triggers a background sync via `waitUntil()` if `last_synced_at` > 3 minutes ago. Compensates for Vercel Hobby's single daily cron limit.
 - **Live sync on Refresh**: `/api/scores/{code}?sync=1` (used by the dashboard Refresh button) awaits a GeoSports sync *before* responding, so a fresh play appears in one refresh.
 - **Lazy Supabase client**: Proxy pattern avoids `supabaseUrl is required` errors at Next.js build time.

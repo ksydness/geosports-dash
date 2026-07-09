@@ -79,6 +79,17 @@ export async function GET(
     .eq('group_code', code)
     .order('date', { ascending: false });
 
+  // Manual score corrections (e.g. GeoSports answer-key errors). Overrides are
+  // merged at read time so daily syncs never clobber them.
+  const overridesRes = await supabase
+    .from('score_overrides')
+    .select('date, site, user_id, score, raw_scores')
+    .eq('group_code', code);
+
+  const overrides = new Map(
+    (overridesRes.data || []).map(o => [`${o.date}|${o.site}|${o.user_id}`, o])
+  );
+
   return NextResponse.json({
     group_name: groupRes.data.group_name,
     sites: siteRows.map(r => ({
@@ -86,13 +97,17 @@ export async function GET(
       active: r.active,
       last_synced_at: r.last_synced_at,
     })),
-    scores: (scoresRes.data || []).map(s => ({
-      date: s.date,
-      site: s.site,
-      userId: s.user_id,
-      username: s.username,
-      score: s.score,
-      rawScores: s.raw_scores,
-    })),
+    scores: (scoresRes.data || []).map(s => {
+      const o = overrides.get(`${s.date}|${s.site}|${s.user_id}`);
+      return {
+        date: s.date,
+        site: s.site,
+        userId: s.user_id,
+        username: s.username,
+        score: o ? o.score : s.score,
+        rawScores: o?.raw_scores ?? s.raw_scores,
+        corrected: !!o,
+      };
+    }),
   });
 }
