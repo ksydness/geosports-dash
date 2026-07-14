@@ -82,10 +82,10 @@ CREATE TABLE score_overrides (      -- manual corrections (e.g. GeoSports answer
   group_code TEXT NOT NULL REFERENCES groups(group_code) ON DELETE CASCADE,
   site TEXT NOT NULL DEFAULT 'geosports',
   date DATE NOT NULL,
-  user_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,   -- same key shape as scores (group_code, site, date, user_id)
   raw_scores JSONB,        -- corrected per-question raw array
   score INTEGER NOT NULL,  -- corrected daily total
-  reason TEXT,
+  reason TEXT,             -- why the override was applied (audit note)
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (group_code, site, date, user_id)
 );
@@ -96,6 +96,11 @@ CREATE TABLE answers (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 ```
+
+All five tables have RLS enabled (no policies) — the app reaches the DB only via
+the Supabase service role key, which bypasses RLS, so anon/public access is
+blocked. `score_overrides` had RLS enabled 2026-07-14 to close a Supabase
+security advisor (`rls_disabled_in_public`).
 
 ## Multi-site (GeoSports + GeoHistory + GeoFooty)
 
@@ -166,8 +171,86 @@ lib/
 - Base: `https://geosports.app`
 - Auth: `Cookie: __Secure-geosports.session_token=<token>`
 - Group endpoint: `GET /api/groups/{group_code}?date=YYYY-MM-DD`
-- Questions: `GET /api/v2/questions` (public, no auth)
+- Questions: `GET /api/v2/questions` (public, no auth) — now returns a ~60-day
+  archive of rounds (`{rounds: [{date, questions[]}]}`), not just recent days
 - 401/403 → token invalid/expired; group gets deactivated
+
+### Global leaderboard (added ~July 2026, not yet used by dashboard)
+
+- `GET /api/leaderboard?date=YYYY-MM-DD&limit=N&offset=N` — public, no auth
+- Response: `{date, total, submittedTotal, hasMore, entries: [{rank, username, score}], you, averageScore}`
+  - `total` varies per date (~48–78k) — appears to be users who started that
+    day's round, NOT global registered count; `submittedTotal` = plays that day
+  - `averageScore` = global average for the day (e.g. 802)
+  - `you` = caller's own entry when a session cookie is sent, else null
+  - Paginate with `offset` + `hasMore`
+- **Historical dates now work (verified 2026-07-11)**: full data (entries +
+  `averageScore`) is served for any date from **2026-06-27** onward; earlier
+  dates return empty (`total: 0`). No snapshot cron needed for ≥2026-06-27;
+  pre-cutoff global data is unrecoverable. Also live on geohistory.gg and
+  geofooty.app.
+- `POST /api/leaderboard/submit` — client submits the day's result to the
+  global board (dashboard never needs this).
+
+### Authed endpoints (verified with live session, July 2026)
+
+All take `Cookie: __Secure-geosports.session_token=<token>` and return the
+**token owner's** data only:
+
+- `GET /api/auth/get-session` — `{session: {userId, expiresAt, ...}, user: {id, name, email, ...}}`.
+  **Sliding expiry, verified July 2026**: calling get-session pushes `expiresAt`
+  to now+30d, so the daily sync keeps stored tokens alive indefinitely. Tokens
+  only die if syncs stop for 30 days or the user logs out. Each sync stores the
+  reported expiry in `group_sites.expires_at`.
+- `GET /api/me/history?from=YYYY-MM-DD&to=YYYY-MM-DD` — `{from, to, entries: [{date, score}]}`.
+  Defaults to last 30 days; explicit `from`/`to` returns full history back to
+  account creation. Daily totals only, no per-question data.
+- `GET /api/results/daily?date=YYYY-MM-DD` — own result with **exact guess
+  coordinates**: `{resultId, totalScore, source, username, completedAt,
+  guesses: [{questionId, questionIndex, guessLat, guessLng, distanceMiles,
+  rawScore, multiplier, score, answer: {lat, lng, name, story}}]}`. Session-scoped
+  only — user params are ignored, so other group members' pins are NOT obtainable.
+- Leaderboard `you` caveat (re-verified 2026-07-11): `you` is **null even when
+  authed and played** (today and past dates). Likely explanation: the global
+  board is opt-in via `POST /api/leaderboard/submit` — `submittedTotal` (~9k)
+  ≪ `total` (~48k), so `entries`/`you` only cover users who submitted. Don't
+  build global-rank features on `you`.
+
+### Pro (added ~July 2026)
+
+- `GET /api/pro/entitlement` — authed; `{authenticated, email, isPro, planInterval}`.
+  Works as a cheap session-token health check. Unauthed → 200
+  `{authenticated: false, isPro: false}` (no email field).
+- `GET /api/pro/leaderboard` — `{"error": "Not a Pro subscriber"}` for free users
+- `GET /api/pro/state?date=YYYY-MM-DD` — **Pro-gated**: 401 unauthed, 403
+  `{"error":"Not a Pro subscriber"}` for authed free users
+- Pro tier gates: previous days, random rounds, sport-specific rounds
+  (General/NBA/NFL/MLB), pro leaderboard
+- Stripe billing routes: `POST /api/stripe/checkout|portal|cancel`,
+  `GET /api/stripe/status` (all authed)
+
+### Other endpoints found in client bundles (2026-07-11; GETs verified authed via Kenny's Chrome session)
+
+Discovered by mining `_next` JS chunks on geosports.app; all authed
+(401 `{"error":"Not authenticated"}` without a cookie):
+
+- `GET /api/groups` — caller's groups: `{groups: [{id, name, code, role,
+  memberCount, createdAt}]}`; `POST /api/groups {name}` — create a group;
+  `POST /api/groups/join {code}` — join
+- `POST /api/groups/{code}/nickname {nickname}` — **per-group display names**.
+  Usernames in the group endpoint can now differ per group and change anytime —
+  reinforces that scores must be keyed on `user_id`, never `username`.
+- `GET/PUT /api/me/preferences` — `{confirmToLock: bool}`
+- `GET /api/stripe/status` — `{active: bool}`
+- `POST /api/v2/play/guess {date, questionIndex, guess, clientId}` — the guess
+  endpoint (source of the answer-key cache)
+- `POST /api/play/complete {date, clientId, ...}` and
+  `POST /api/results/commit-daily` — round completion / result persistence
+- Page routes (from embedded route manifest): `/me`, `/embed/globe`, `/play`,
+  `/results`, `/groups`, `/groups/join`, `/leaderboard`, `/login`,
+  `/how-it-works`, `/pro/*`
+- Ignore `/api/early_access_features`, `/api/surveys`, `/api/product_tours`,
+  `/api/web_experiments` in bundles — those are PostHog, not GeoSports.
 
 ## Dashboard Tabs
 
