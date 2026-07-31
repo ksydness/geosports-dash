@@ -171,9 +171,15 @@ lib/
 - Base: `https://geosports.app`
 - Auth: `Cookie: __Secure-geosports.session_token=<token>`
 - Group endpoint: `GET /api/groups/{group_code}?date=YYYY-MM-DD`
-- Questions: `GET /api/v2/questions` (public, no auth) — now returns a ~60-day
-  archive of rounds (`{rounds: [{date, questions[]}]}`), not just recent days
+- Questions: `GET /api/v2/questions` (public, no auth) — archive of rounds,
+  `{rounds: [{date, questions: [{id, prompt, map, difficulty}]}]}`. Re-verified
+  2026-07-31: **89 rounds, 2026-05-04 → today**, 5 questions per round.
+  `difficulty` is new since the last scan but is `"medium"` on all 445 questions
+  — a placeholder, don't branch on it. `id` is `YYYY-MM-DD-qN`, `map` is `world`.
 - 401/403 → token invalid/expired; group gets deactivated
+- Group endpoint shape unchanged (2026-07-31): `{group: {id, name, code,
+  memberCount}, leaderboard: [{userId, username, role, score, rawScores}],
+  currentUserId}`
 
 ### Global leaderboard (added ~July 2026, not yet used by dashboard)
 
@@ -184,15 +190,39 @@ lib/
   - `averageScore` = global average for the day (e.g. 802)
   - `you` = caller's own entry when a session cookie is sent, else null
   - Paginate with `offset` + `hasMore`
-- **Historical dates now work (verified 2026-07-11)**: full data (entries +
-  `averageScore`) is served for any date from **2026-06-27** onward; earlier
-  dates return empty (`total: 0`). No snapshot cron needed for ≥2026-06-27;
-  pre-cutoff global data is unrecoverable. Also live on geohistory.gg and
-  geofooty.app.
+- **REGRESSION — history is now a 14-day rolling window (verified 2026-07-31)**:
+  the old behaviour (any date from 2026-06-27 onward) is gone. Boundary probed
+  on 2026-07-31: `2026-07-17` returns full data, `2026-07-16` and everything
+  earlier returns `{total: 0, submittedTotal: 0, averageScore: null, entries: []}`
+  — i.e. **today − 14 days**. Dates that worked in the 2026-07-11 scan
+  (2026-06-27 … 2026-07-16) no longer do, so this is a server-side retention
+  change, not a backfill gap. Consequence: **global data older than 14 days is
+  permanently unrecoverable**, and a daily snapshot cron is now required if the
+  dashboard ever wants long-run "vs. the world" comparisons. Sample values on
+  2026-07-31: total 43878 / submitted 10244 / avg 783 (today, still filling);
+  2026-07-29: 66378 / 14521 / 837.
 - `POST /api/leaderboard/submit` — client submits the day's result to the
   global board (dashboard never needs this).
 
-### Authed endpoints (verified with live session, July 2026)
+### Streaks (NEW — discovered 2026-07-31)
+
+- `GET /api/streak` — no params (a `?gameId=` query is ignored; the game is
+  inferred from the domain). Authed response:
+  `{enabled: true, gameId: "geosports", currentStreak, longestStreak,
+  lastPlayedDate, streakStartedDate, isMilestone, visualTier, quip,
+  week: [{date, state}]}` where `state` ∈ `missed | played | today | future`
+  and `week` spans the current Sun–Sat window (includes future days).
+  `visualTier` (`"default"`) and `quip` (`"WARMING UP"`) look like presentation
+  hooks tied to streak length / `isMilestone`.
+- **Unauthed it returns 200 `{enabled: false, gameId: "geosports"}`, not 401** —
+  so it is useless as a session-health check (use `/api/pro/entitlement` for
+  that, which does report `authenticated`).
+- Also live on geohistory.gg (`gameId: "geohistory"`), so `gameId` is per-domain.
+- Session-scoped like everything else: no way to get other members' streaks, so
+  a group streak leaderboard would have to be computed from our own `scores`
+  table rather than fetched.
+
+### Authed endpoints (verified with live session, July 2026; re-verified 2026-07-31)
 
 All take `Cookie: __Secure-geosports.session_token=<token>` and return the
 **token owner's** data only:
@@ -206,14 +236,17 @@ All take `Cookie: __Secure-geosports.session_token=<token>` and return the
   Defaults to last 30 days; explicit `from`/`to` returns full history back to
   account creation. Daily totals only, no per-question data.
 - `GET /api/results/daily?date=YYYY-MM-DD` — own result with **exact guess
-  coordinates**: `{resultId, totalScore, source, username, completedAt,
+  coordinates**: `{resultId, date, totalScore, source, username, completedAt,
   guesses: [{questionId, questionIndex, guessLat, guessLng, distanceMiles,
   rawScore, multiplier, score, answer: {lat, lng, name, story}}]}`. Session-scoped
   only — user params are ignored, so other group members' pins are NOT obtainable.
-- Leaderboard `you` caveat (re-verified 2026-07-11): `you` is **null even when
-  authed and played** (today and past dates). Likely explanation: the global
-  board is opt-in via `POST /api/leaderboard/submit` — `submittedTotal` (~9k)
-  ≪ `total` (~48k), so `entries`/`you` only cover users who submitted. Don't
+  A `date` field is now echoed at the top level. A date the caller didn't play
+  returns **404 `{"error":"not found"}`** (no auth error), so callers must handle
+  404 as "no result", not as a bad token.
+- Leaderboard `you` caveat (re-verified 2026-07-31): `you` is still **null even
+  when authed and played** (today and past dates). Likely explanation: the global
+  board is opt-in via `POST /api/leaderboard/submit` — `submittedTotal` (~10–15k)
+  ≪ `total` (~44–70k), so `entries`/`you` only cover users who submitted. Don't
   build global-rank features on `you`.
 
 ### Pro (added ~July 2026)
@@ -229,10 +262,24 @@ All take `Cookie: __Secure-geosports.session_token=<token>` and return the
 - Stripe billing routes: `POST /api/stripe/checkout|portal|cancel`,
   `GET /api/stripe/status` (all authed)
 
-### Other endpoints found in client bundles (2026-07-11; GETs verified authed via Kenny's Chrome session)
+### Other endpoints found in client bundles (rescanned 2026-07-31 via Kenny's Chrome session)
 
 Discovered by mining `_next` JS chunks on geosports.app; all authed
 (401 `{"error":"Not authenticated"}` without a cookie):
+
+**Full route inventory as of the 2026-07-31 rescan** (28 chunks across `/`,
+`/me`, `/groups`, `/groups/join`, `/leaderboard`, `/pro`, `/play`, `/results`,
+`/login`, `/how-it-works`, `/embed/globe`, `/pro/success`): `/api/auth/*`,
+`/api/groups`, `/api/groups/{code}`, `/api/groups/{code}/nickname`,
+`/api/groups/join`, `/api/leaderboard`, `/api/leaderboard/submit`,
+`/api/me/history`, `/api/me/preferences`, `/api/play/complete`,
+`/api/pro/entitlement`, `/api/pro/state`, `/api/results/commit-daily`,
+`/api/results/daily`, `/api/streak`, `/api/stripe/{checkout,portal,cancel,status}`,
+`/api/v2/play/guess`, `/api/v2/questions`. `/api/streak` is the only addition.
+~25 plausible guesses (`/api/me/stats`, `/api/achievements`, `/api/friends`,
+`/api/groups/{code}/history`, `/api/leaderboard/friends`, …) all 404, so the
+bundle inventory appears complete. `/stats`, `/settings` and `/archive` are not
+routes (404); `/pro/success` is.
 
 - `GET /api/groups` — caller's groups: `{groups: [{id, name, code, role,
   memberCount, createdAt}]}`; `POST /api/groups {name}` — create a group;
@@ -246,6 +293,8 @@ Discovered by mining `_next` JS chunks on geosports.app; all authed
   endpoint (source of the answer-key cache)
 - `POST /api/play/complete {date, clientId, ...}` and
   `POST /api/results/commit-daily` — round completion / result persistence
+- `GET /api/streak` — see the Streaks section above (the only route added since
+  the 2026-07-11 scan)
 - Page routes (from embedded route manifest): `/me`, `/embed/globe`, `/play`,
   `/results`, `/groups`, `/groups/join`, `/leaderboard`, `/login`,
   `/how-it-works`, `/pro/*`
