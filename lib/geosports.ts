@@ -1,5 +1,6 @@
 import { todayET } from './dates';
 import { Site, SITES, DEFAULT_SITE } from './sites';
+import { isRawSessionToken } from './token-paste';
 
 /** Thrown when a site session token is rejected (expired/invalid). */
 export class AuthError extends Error {
@@ -9,43 +10,58 @@ export class AuthError extends Error {
   }
 }
 
-// Once we learn which cookie name a site authenticates with, remember it for
-// the rest of this serverless invocation (a backfill makes ~30 sequential
-// requests; only the first pays the candidate-probing cost).
-const resolvedCookieName: Partial<Record<Site, string>> = {};
+// A token authenticates over one of two transports:
+//   - `Authorization: Bearer <token>` — works for RAW session tokens (the
+//     `session.token` value from get-session; better-auth's bearer plugin,
+//     verified 2026-07-31)
+//   - `Cookie: <name>=<token>` — works for pasted cookie VALUES (legacy
+//     DevTools flow); the right cookie name varies per site.
+// BEARER is a sentinel in the same candidate list as the cookie names.
+const BEARER = ':bearer';
 
-function baseHeaders(site: Site, cookieName: string, token: string) {
+// Once we learn which transport a site accepts for this invocation's token,
+// remember it (a backfill makes ~30 sequential requests; only the first pays
+// the candidate-probing cost).
+const resolvedTransport: Partial<Record<Site, string>> = {};
+
+function baseHeaders(site: Site, transport: string, token: string): Record<string, string> {
   const { base } = SITES[site];
-  return {
-    Cookie: `${cookieName}=${token}`,
+  const common = {
     'User-Agent':
       'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
     Accept: 'application/json, text/plain, */*',
     Referer: `${base}/`,
     Origin: base,
   };
+  return transport === BEARER
+    ? { ...common, Authorization: `Bearer ${token}` }
+    : { ...common, Cookie: `${transport}=${token}` };
 }
 
 /**
  * Fetch a path on a site's API with the group's session token, trying each
- * candidate cookie name until one authenticates. Returns the Response for the
- * authenticated name (or the last response if every candidate was rejected).
- * Throws only on network error.
+ * candidate transport (Bearer header / cookie names) until one authenticates.
+ * Raw tokens try Bearer first; cookie-shaped tokens try cookies first. Returns
+ * the Response for the authenticated transport (or the last response if every
+ * candidate was rejected). Throws only on network error.
  */
 async function siteFetch(site: Site, token: string, path: string): Promise<Response> {
   const { base, cookieNames } = SITES[site];
   const url = `${base}${path}`;
 
-  // Use the previously-resolved name first if we have one.
-  const order = resolvedCookieName[site]
-    ? [resolvedCookieName[site]!, ...cookieNames.filter(n => n !== resolvedCookieName[site])]
-    : cookieNames;
+  const candidates = isRawSessionToken(token)
+    ? [BEARER, ...cookieNames]
+    : [...cookieNames, BEARER];
+
+  // Use the previously-resolved transport first if we have one.
+  const resolved = resolvedTransport[site];
+  const order = resolved ? [resolved, ...candidates.filter(n => n !== resolved)] : candidates;
 
   let last: Response | null = null;
-  for (const name of order) {
-    const res = await fetch(url, { headers: baseHeaders(site, name, token) });
+  for (const transport of order) {
+    const res = await fetch(url, { headers: baseHeaders(site, transport, token) });
     if (res.status !== 401 && res.status !== 403) {
-      resolvedCookieName[site] = name; // this name is accepted by the server
+      resolvedTransport[site] = transport; // this transport is accepted by the server
       return res;
     }
     last = res;
@@ -81,7 +97,7 @@ export interface GeoDayResult {
 }
 
 const tokenRejected = (site: Site) =>
-  `${SITES[site].label} session token rejected — make sure you copied the full value of the ${SITES[site].cookieNames[0]} cookie from DevTools and that you are logged in to ${SITES[site].base.replace('https://', '')}`;
+  `${SITES[site].label} session key rejected — make sure you are logged in at ${SITES[site].base.replace('https://', '')}, then open ${SITES[site].base}/api/auth/get-session, copy the whole page, and paste it again`;
 
 /** Validate credentials + get group info for a site. Throws if auth fails. */
 export async function fetchGroupInfo(
@@ -139,6 +155,31 @@ export async function fetchDayScores(
 ): Promise<GeoScoreEntry[] | null> {
   const r = await fetchGroupDay(groupCode, sessionToken, date, site);
   return r ? r.played : null;
+}
+
+export interface GeoMyGroup {
+  id?: string;
+  name: string;
+  code: string;
+  role?: string;
+  memberCount?: number;
+}
+
+/**
+ * List the groups the token's owner belongs to on a site (GET /api/groups).
+ * Powers the group picker in the connect flow. Throws if the token is bad.
+ */
+export async function fetchMyGroups(
+  sessionToken: string,
+  site: Site = DEFAULT_SITE
+): Promise<GeoMyGroup[]> {
+  const res = await siteFetch(site, sessionToken, '/api/groups');
+  if (res.status === 401 || res.status === 403) throw new Error(tokenRejected(site));
+  if (!res.ok) throw new Error(`${SITES[site].label} returned HTTP ${res.status}`);
+  const data: { groups?: GeoMyGroup[]; error?: string } = await res.json();
+  if (data.error === 'Not authenticated') throw new Error(tokenRejected(site));
+  if (data.error) throw new Error(data.error);
+  return (data.groups || []).filter(g => g && typeof g.code === 'string' && g.code);
 }
 
 /** Proxy a site's public questions endpoint (no auth needed). */

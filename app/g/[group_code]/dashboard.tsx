@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from 'react';
 import { milesToRawScore, haversineMiles, scoreTier, greatCirclePoints } from '@/lib/scoring';
+import { parseTokenPaste, keyPageUrl } from '@/lib/token-paste';
 
 interface ScoreEntry {
   date: string;
@@ -475,13 +476,16 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
         <div class="connect-title">${info.emoji} Connect ${esc(info.label)}</div>
         <div class="connect-steps">
           1. Log in at <a href="https://${info.host}" target="_blank" rel="noopener" style="color:${info.accent}">${info.host}</a><br>
-          2. DevTools (F12) → <b>Application</b> ▸ <b>Cookies</b> ▸ https://${info.host}<br>
-          3. Copy the value of <code>${esc(info.cookie)}</code>
+          2. Open your <a href="${keyPageUrl(info.host)}" target="_blank" rel="noopener" style="color:${info.accent}"><b>key page</b> ↗</a> — it shows a block of code<br>
+          3. Select <b>everything</b> on it, copy, and paste below
         </div>
-        <textarea id="connectInput" rows="3" class="connect-input" placeholder="Paste ${esc(info.label)} session token"></textarea>
+        <textarea id="connectInput" rows="3" class="connect-input" placeholder="Paste everything from your ${esc(info.label)} key page"></textarea>
         <div class="connect-actions">
           <button class="connect-submit" style="background:${info.accent}" onclick="submitConnect('${site}')">Connect ${esc(info.label)}</button>
           <span id="connectStatus" class="connect-status"></span>
+        </div>
+        <div class="connect-steps" style="margin-top:10px;opacity:0.55">
+          Old method still works too: DevTools (F12) → Application ▸ Cookies ▸ copy <code>${esc(info.cookie)}</code>
         </div>`;
       setTimeout(() => (document.getElementById('connectInput') as HTMLElement | null)?.focus(), 50);
     }
@@ -498,11 +502,13 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
   (window as any).submitConnect = async function(site: string) {
     const input = document.getElementById('connectInput') as HTMLTextAreaElement | null;
     const status = document.getElementById('connectStatus');
-    const token = (input?.value || '').trim();
     const setStatus = (msg: string, color: string) => {
       if (status) { status.textContent = msg; status.style.color = color; }
     };
-    if (!token) { setStatus('Paste your token first.', '#fca5a5'); return; }
+    // Key-page JSON is parsed client-side — only the token goes to our server.
+    const parsed = parseTokenPaste(input?.value || '');
+    if (!parsed.ok) { setStatus(parsed.error, '#fca5a5'); return; }
+    const token = parsed.token;
     setStatus('Verifying…', '#cbd5e1');
     try {
       const res = await fetch('/api/register', {
