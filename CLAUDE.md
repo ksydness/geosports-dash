@@ -118,6 +118,16 @@ cookie name candidates, label/accent/emoji).
   one site is enough; more can be added later from the dashboard's ＋ / connect
   modal (same endpoint, upserts per `group_code+site`). Legacy `{ session_token }`
   still works and is treated as geosports.
+- **Key-page connect flow (2026-07-31)**: users open
+  `https://<site>/api/auth/get-session` ("key page") while logged in, copy the
+  whole JSON, and paste it into the registration page or connect modal — no
+  DevTools, works on mobile. `lib/token-paste.ts` parses the paste CLIENT-SIDE
+  (email/IP in the blob never reach our server; only `session.token` does) and
+  also accepts raw tokens and legacy cookie values. `siteFetch` sends raw
+  tokens as `Authorization: Bearer` (better-auth bearer plugin) and cookie
+  values via the cookie-candidate path. `POST /api/token/groups {site, token}`
+  validates a key and returns the member's groups (from the site's
+  `GET /api/groups`) to power the registration group picker.
 - **Dashboard**: a site switcher sits above the 5 tabs. Selecting a site filters
   the score array to that site; **Sicko Mode** (shown when ≥2 sites connected)
   sums each player's daily score across sites by `user_id` (totals only — raw
@@ -140,12 +150,14 @@ app/
     register/route.ts             # POST: register a group, kick off 30-day backfill
     scores/[group_code]/route.ts  # GET: return scores + auto-sync if stale >10min
     questions/route.ts            # GET: proxy GeoSports public questions endpoint
+    token/groups/route.ts         # POST: validate a session key, list the member's groups (connect flow)
     cron/sync/route.ts            # GET: daily cron — sync all active groups (full backfill for groups <48h old)
     backfill/[group_code]/route.ts # GET/POST: re-run 30-day backfill (public, 24h throttle via groups.last_backfilled_at; CRON_SECRET bypasses)
 lib/
   supabase.ts   # Lazy-initialized Supabase client (Proxy pattern, avoids build errors)
   crypto.ts     # AES-256-GCM encrypt/decrypt for session tokens
-  geosports.ts  # GeoSports API client (fetchGroupInfo, fetchDayScores, fetchQuestions, AuthError)
+  geosports.ts  # GeoSports API client (fetchGroupInfo, fetchDayScores, fetchMyGroups, fetchQuestions, AuthError); siteFetch tries Bearer + cookie transports
+  token-paste.ts # Client-side key-page/raw/cookie paste parsing (parseTokenPaste, keyPageUrl)
   sync.ts       # Shared sync logic (syncGroup, upsertDayScores) — deactivates group on AuthError
   dates.ts      # Eastern-time date helpers (todayET, etDateMinusDays)
   scoring.ts    # Local replica of GeoSports' distance→points curve (haversineMiles, milesToRawScore, scoreTier, greatCirclePoints, MULTIPLIERS) — powers the easter-egg practice game without calling the live API
@@ -232,6 +244,21 @@ All take `Cookie: __Secure-geosports.session_token=<token>` and return the
   to now+30d, so the daily sync keeps stored tokens alive indefinitely. Tokens
   only die if syncs stop for 30 days or the user logs out. Each sync stores the
   reported expiry in `group_sites.expires_at`.
+- `GET /api/auth/token` (NEW — found 2026-07-31) — better-auth JWT plugin. Mints
+  a **15-minute** EdDSA JWT (`{token}`; claims `sub/email/iat/exp/iss/aud`) for
+  the session-cookie owner; 401 without the cookie. JWKS at `/api/auth/jwks`.
+  `Authorization: Bearer <jwt>` authenticates API calls without a cookie
+  (verified on `/api/me/history` and the group endpoint). **Not an alternative
+  connection method**: minting requires an existing session cookie and the JWT
+  dies in 15 min, so registration still needs the pasted session token. No API
+  keys / OAuth / share-link endpoints exist (`/api/auth/api-key`, `/api/keys`,
+  `/api/groups/{code}/share`, etc. all 404; group endpoint still 401 unauthed —
+  all probed 2026-07-31). **CORS: geosports.app sends no
+  `Access-Control-Allow-Origin` at all** (probed 2026-07-31 from
+  geosports-dash.vercel.app: Bearer requests, public `v2/questions` +
+  `leaderboard`, and the JWT mint are ALL browser-blocked cross-origin). So no
+  client-side calls to GeoSports ever — everything must proxy through our API
+  routes, JWTs included. Server-side Bearer use still works fine.
 - `GET /api/me/history?from=YYYY-MM-DD&to=YYYY-MM-DD` — `{from, to, entries: [{date, score}]}`.
   Defaults to last 30 days; explicit `from`/`to` returns full history back to
   account creation. Daily totals only, no per-question data.
@@ -254,7 +281,7 @@ All take `Cookie: __Secure-geosports.session_token=<token>` and return the
 - `GET /api/pro/entitlement` — authed; `{authenticated, email, isPro, planInterval}`.
   Works as a cheap session-token health check. Unauthed → 200
   `{authenticated: false, isPro: false}` (no email field).
-- `GET /api/pro/leaderboard` — `{"error": "Not a Pro subscriber"}` for free users
+- `GET /api/pro/leaderboard` — 403 `{"error": "Not a Pro subscriber"}` for free users
 - `GET /api/pro/state?date=YYYY-MM-DD` — **Pro-gated**: 401 unauthed, 403
   `{"error":"Not a Pro subscriber"}` for authed free users
 - Pro tier gates: previous days, random rounds, sport-specific rounds
@@ -262,24 +289,51 @@ All take `Cookie: __Secure-geosports.session_token=<token>` and return the
 - Stripe billing routes: `POST /api/stripe/checkout|portal|cancel`,
   `GET /api/stripe/status` (all authed)
 
+#### Pro gameplay routes (NEW — found in `/pro/*` subpage chunks, 2026-07-31 second pass)
+
+These live only in the chunks loaded by the Pro subpages (`/pro/leaderboard`,
+`/pro/play`, `/pro/results`, `/pro/previous-days`, `/pro/random{,/play,/results,/summary}`,
+`/pro/sport-specific`), which earlier scans never crawled — that's why they were
+missed. All four are **Pro-gated** (403 `{"error":"Not a Pro subscriber"}` on
+Kenny's free account, so response shapes are unverified):
+
+- `GET /api/pro/questions` — presumably the Pro question feed (previous days /
+  sport-specific). Query params unconfirmed: `?date=` and `?sport=` both still
+  403 before validation, and the bundle code didn't reveal them.
+- `GET /api/pro/random-round?exclude=…` — fetch a random round; `exclude` seen
+  in bundle code (likely already-played round ids).
+- `POST /api/pro/random-guess {roundId, questionId, questionIndex, guess}` —
+  guess endpoint for random rounds (405 on GET).
+- `POST /api/results/commit-pro-random {roundId}` — persists a finished random
+  round (405 on GET).
+
+Not useful to the dashboard unless Kenny goes Pro; if a Pro token ever gets
+stored, `/api/pro/questions` may be an answer-key source for pre-2026-05-04
+rounds. Re-probe shapes then.
+
 ### Other endpoints found in client bundles (rescanned 2026-07-31 via Kenny's Chrome session)
 
 Discovered by mining `_next` JS chunks on geosports.app; all authed
 (401 `{"error":"Not authenticated"}` without a cookie):
 
-**Full route inventory as of the 2026-07-31 rescan** (28 chunks across `/`,
-`/me`, `/groups`, `/groups/join`, `/leaderboard`, `/pro`, `/play`, `/results`,
-`/login`, `/how-it-works`, `/embed/globe`, `/pro/success`): `/api/auth/*`,
-`/api/groups`, `/api/groups/{code}`, `/api/groups/{code}/nickname`,
+**Full route inventory as of the 2026-07-31 second-pass rescan** (main pages:
+26 chunks across `/`, `/me`, `/groups`, `/groups/join`, `/leaderboard`, `/pro`,
+`/play`, `/results`, `/login`, `/how-it-works`, `/embed/globe`, `/pro/success`;
+plus 23 chunks across the 9 `/pro/*` subpages, which earlier scans missed):
+`/api/auth/*`, `/api/groups`, `/api/groups/{code}`, `/api/groups/{code}/nickname`,
 `/api/groups/join`, `/api/leaderboard`, `/api/leaderboard/submit`,
 `/api/me/history`, `/api/me/preferences`, `/api/play/complete`,
-`/api/pro/entitlement`, `/api/pro/state`, `/api/results/commit-daily`,
+`/api/pro/entitlement`, `/api/pro/leaderboard`, `/api/pro/questions`,
+`/api/pro/random-guess`, `/api/pro/random-round`, `/api/pro/state`,
+`/api/results/commit-daily`, `/api/results/commit-pro-random`,
 `/api/results/daily`, `/api/streak`, `/api/stripe/{checkout,portal,cancel,status}`,
-`/api/v2/play/guess`, `/api/v2/questions`. `/api/streak` is the only addition.
-~25 plausible guesses (`/api/me/stats`, `/api/achievements`, `/api/friends`,
-`/api/groups/{code}/history`, `/api/leaderboard/friends`, …) all 404, so the
-bundle inventory appears complete. `/stats`, `/settings` and `/archive` are not
-routes (404); `/pro/success` is.
+`/api/v2/play/guess`, `/api/v2/questions`. The four Pro gameplay routes
+(`pro/questions`, `pro/random-round`, `pro/random-guess`,
+`results/commit-pro-random`) are the additions this pass — see the Pro section.
+~23 plausible guesses (`/api/me/stats`, `/api/achievements`, `/api/friends`,
+`/api/leaderboard/friends`, `/api/pro/history`, `/api/v3/questions`, …) all 404,
+so the bundle inventory appears complete. `/stats`, `/settings`, `/archive`,
+`/friends` and `/achievements` are not page routes (404); `/pro/success` is.
 
 - `GET /api/groups` — caller's groups: `{groups: [{id, name, code, role,
   memberCount, createdAt}]}`; `POST /api/groups {name}` — create a group;
@@ -293,11 +347,13 @@ routes (404); `/pro/success` is.
   endpoint (source of the answer-key cache)
 - `POST /api/play/complete {date, clientId, ...}` and
   `POST /api/results/commit-daily` — round completion / result persistence
-- `GET /api/streak` — see the Streaks section above (the only route added since
-  the 2026-07-11 scan)
+- `GET /api/streak` — see the Streaks section above
 - Page routes (from embedded route manifest): `/me`, `/embed/globe`, `/play`,
   `/results`, `/groups`, `/groups/join`, `/leaderboard`, `/login`,
-  `/how-it-works`, `/pro/*`
+  `/how-it-works`, and under `/pro`: `/pro/success`, `/pro/leaderboard`,
+  `/pro/play`, `/pro/results`, `/pro/previous-days`, `/pro/random`,
+  `/pro/random/play`, `/pro/random/results`, `/pro/random/summary`,
+  `/pro/sport-specific`
 - Ignore `/api/early_access_features`, `/api/surveys`, `/api/product_tours`,
   `/api/web_experiments` in bundles — those are PostHog, not GeoSports.
 
