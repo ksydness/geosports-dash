@@ -154,13 +154,17 @@ cookie name candidates, label/accent/emoji).
   to their origin site — the flow degrades gracefully by design). Note this
   means anyone with the dashboard URL can connect/heal games using the stored
   key; acceptable because it only ever exposes the same group's scores.
-  **Legacy caveat (dry-run-verified on 3VX6V9, 2026-07-31)**: only RAW tokens
-  are reliably cross-site. Old cookie-value tokens pasted from DevTools mostly
-  do NOT authenticate on other sites (3VX6V9's geosports token 409'd on both
-  other games; oddly one of TXA6HQ's legacy tokens does work — format drift
-  between sites/eras). So legacy-registered groups get the paste fallback until
-  they refresh any one key via the key-page flow, after which instant connect
-  works. `POST /api/sites/connect {…, dry_run: true}` validates a donor
+  **Legacy tokens (resolved 2026-07-31)**: only RAW tokens are cross-site; the
+  legacy DevTools paste stored the signed cookie VALUE (`<raw>.<signature>`,
+  sometimes URL-encoded) whose signature is site-locked — 3VX6V9's geosports
+  token 409'd on both other games as-is. But the raw session id inside IS
+  cross-site, so `sites/connect` unwraps signed donors (`rawTokenInside`) and
+  tries the raw part too, storing the raw token on success (`upgraded: true`).
+  Dry-run-verified on 3VX6V9: both geohistory and geofooty now pass via the
+  unwrapped geosports donor, so legacy groups get instant connect with no user
+  action. Login status is irrelevant (sessions are server rows keyed by token;
+  TXA6HQ's geosports token failed on geofooty despite an active geofooty
+  login). `POST /api/sites/connect {…, dry_run: true}` validates a donor
   without saving — use it to test a group's instant-connect eligibility.
 - **Dashboard**: a site switcher sits above the 5 tabs. Selecting a site filters
   the score array to that site; **Sicko Mode** (shown when ≥2 sites connected)
