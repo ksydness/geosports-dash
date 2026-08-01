@@ -454,8 +454,10 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
   };
 
   // Open the connect modal — with no site it shows a picker of unconnected
-  // games; with a site it shows that game's token form. Used both to add a new
-  // game and to refresh an expired token (register upserts per group_code+site).
+  // games; with a site it offers one-click connect (reusing a key the
+  // dashboard already stores — keys work across all three games) with the
+  // key-page paste flow as fallback. Used both to add a new game and to
+  // refresh an expired token (register upserts per group_code+site).
   (window as any).openConnect = function(site?: string) {
     const modal = document.getElementById('connectModal');
     const body = document.getElementById('connectBody');
@@ -467,30 +469,74 @@ function initDashboard(groupCode: string, initialData?: InitialData) {
         body.innerHTML = `<div class="connect-title">All games connected 🎉</div>`;
       } else {
         body.innerHTML = `<div class="connect-title">Connect another game</div>
-          <div class="connect-sub">Track another game for this group. You only need to be logged into it.</div>
+          <div class="connect-sub">Track another game for this group — usually just one click.</div>
           <div class="connect-pick">${avail.map(s => `<button class="connect-pick-btn" style="--chip:${SITE_INFO[s].accent}" onclick="openConnect('${s}')">${SITE_INFO[s].emoji} ${esc(SITE_INFO[s].label)}</button>`).join('')}</div>`;
       }
     } else {
       const info = SITE_INFO[site];
+      // Any other stored connection can donate its key (cross-site tokens).
+      const hasDonor = sitesMeta.some(m => m.site !== site);
       body.innerHTML = `
         <div class="connect-title">${info.emoji} Connect ${esc(info.label)}</div>
+        ${hasDonor ? `
         <div class="connect-steps">
-          1. Log in at <a href="https://${info.host}" target="_blank" rel="noopener" style="color:${info.accent}">${info.host}</a><br>
-          2. Open your <a href="${keyPageUrl(info.host)}" target="_blank" rel="noopener" style="color:${info.accent}"><b>key page</b> ↗</a> — it shows a block of code<br>
-          3. Select <b>everything</b> on it, copy, and paste below
+          This dashboard already has a key on file, and one key works for all three games.
         </div>
-        <textarea id="connectInput" rows="3" class="connect-input" placeholder="Paste everything from your ${esc(info.label)} key page"></textarea>
         <div class="connect-actions">
-          <button class="connect-submit" style="background:${info.accent}" onclick="submitConnect('${site}')">Connect ${esc(info.label)}</button>
-          <span id="connectStatus" class="connect-status"></span>
+          <button class="connect-submit" style="background:${info.accent}" onclick="instantConnect('${site}')">⚡ Connect ${esc(info.label)} instantly</button>
+          <span id="instantStatus" class="connect-status"></span>
         </div>
-        <div class="connect-steps" style="margin-top:10px;opacity:0.55">
-          Old method still works too: DevTools (F12) → Application ▸ Cookies ▸ copy <code>${esc(info.cookie)}</code>
+        <button class="connect-alt" onclick="showPasteConnect('${site}')">…or paste a new key instead</button>` : ''}
+        <div id="pasteConnect" style="display:${hasDonor ? 'none' : 'block'}">
+          <div class="connect-steps">
+            1. Log in at <a href="https://${info.host}" target="_blank" rel="noopener" style="color:${info.accent}">${info.host}</a><br>
+            2. Open your <a href="${keyPageUrl(info.host)}" target="_blank" rel="noopener" style="color:${info.accent}"><b>key page</b> ↗</a> — it shows a block of code<br>
+            3. Select <b>everything</b> on it, copy, and paste below
+          </div>
+          <textarea id="connectInput" rows="3" class="connect-input" placeholder="Paste everything from your ${esc(info.label)} key page"></textarea>
+          <div class="connect-actions">
+            <button class="connect-submit" style="background:${info.accent}" onclick="submitConnect('${site}')">Connect ${esc(info.label)}</button>
+            <span id="connectStatus" class="connect-status"></span>
+          </div>
+          <div class="connect-steps" style="margin-top:10px;opacity:0.55">
+            Any game&#39;s key page works here. Old method too: DevTools (F12) → Application ▸ Cookies ▸ copy <code>${esc(info.cookie)}</code>
+          </div>
         </div>`;
-      setTimeout(() => (document.getElementById('connectInput') as HTMLElement | null)?.focus(), 50);
+      if (!hasDonor) setTimeout(() => (document.getElementById('connectInput') as HTMLElement | null)?.focus(), 50);
     }
     modal.style.display = 'flex';
     document.body.style.overflow = 'hidden';
+  };
+
+  // Reveal the paste fallback inside the connect modal.
+  (window as any).showPasteConnect = function() {
+    const el = document.getElementById('pasteConnect');
+    if (el) el.style.display = 'block';
+    setTimeout(() => (document.getElementById('connectInput') as HTMLElement | null)?.focus(), 50);
+  };
+
+  // One-click connect: the server revalidates a stored donor key against the
+  // target game and saves it — no new key needed. Falls back to paste on error.
+  (window as any).instantConnect = async function(site: string) {
+    const status = document.getElementById('instantStatus');
+    const setStatus = (msg: string, color: string) => {
+      if (status) { status.textContent = msg; status.style.color = color; }
+    };
+    setStatus('Connecting…', '#cbd5e1');
+    try {
+      const res = await fetch('/api/sites/connect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ group_code: groupCode, site }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not connect');
+      setStatus('✓ Connected — reloading…', '#86efac');
+      setTimeout(() => location.reload(), 900);
+    } catch (e: any) {
+      setStatus(e?.message || 'Could not connect', '#fca5a5');
+      (window as any).showPasteConnect(site);
+    }
   };
 
   (window as any).closeConnect = function() {
@@ -1689,4 +1735,5 @@ const CSS = `
   .connect-actions { display:flex; align-items:center; gap:10px; margin-top:12px; flex-wrap:wrap; }
   .connect-submit { border:none; color:#fff; font-weight:700; border-radius:8px; padding:9px 16px; font-size:13px; cursor:pointer; }
   .connect-status { font-size:12px; }
+  .connect-alt { background:none; border:none; color:var(--muted); font-size:12px; cursor:pointer; padding:0; margin:12px 0 6px; text-decoration:underline; text-decoration-style:dotted; display:block; }
 `;

@@ -13,21 +13,21 @@ const SITES: { key: SiteKey; label: string; host: string; cookie: string; emoji:
 ];
 
 interface MyGroup { code: string; name: string; memberCount?: number }
-interface PasteStatus { ok: boolean; msg: string }
 
 export default function Home() {
   const router = useRouter();
   const [groupCode, setGroupCode] = useState('');
-  const [tokens, setTokens] = useState<Record<SiteKey, string>>({ geosports: '', geohistory: '', geofooty: '' });
-  const [pastes, setPastes] = useState<Record<SiteKey, string>>({ geosports: '', geohistory: '', geofooty: '' });
-  const [pasteStatus, setPasteStatus] = useState<Record<SiteKey, PasteStatus | null>>({ geosports: null, geohistory: null, geofooty: null });
+  const [paste, setPaste] = useState('');
+  const [token, setToken] = useState('');
+  const [keyStatus, setKeyStatus] = useState<{ ok: boolean; msg: string } | null>(null);
+  const [selected, setSelected] = useState<Record<SiteKey, boolean>>({ geosports: true, geohistory: false, geofooty: false });
   const [myGroups, setMyGroups] = useState<MyGroup[]>([]);
   const [groupsLoading, setGroupsLoading] = useState(false);
   const [showManualCode, setShowManualCode] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [helpFor, setHelpFor] = useState<SiteKey | null>(null);
 
   useEffect(() => {
     const code = new URLSearchParams(window.location.search).get('code');
@@ -37,80 +37,79 @@ export default function Home() {
     }
   }, []);
 
-  const anyToken = SITES.some(s => tokens[s.key].trim());
-
-  function setStatus(site: SiteKey, status: PasteStatus | null) {
-    setPasteStatus(p => ({ ...p, [site]: status }));
-  }
+  const selectedSites = SITES.filter(s => selected[s.key]).map(s => s.key);
 
   // Parse whatever landed in the paste box. The key page's JSON is parsed
   // right here in the browser — only the extracted token ever leaves it.
-  function handlePaste(site: SiteKey, value: string) {
-    setPastes(p => ({ ...p, [site]: value }));
+  function handlePaste(value: string) {
+    setPaste(value);
     setError('');
     if (!value.trim()) {
-      setTokens(t => ({ ...t, [site]: '' }));
-      setStatus(site, null);
+      setToken('');
+      setKeyStatus(null);
       return;
     }
     const parsed = parseTokenPaste(value);
     if (!parsed.ok) {
-      setTokens(t => ({ ...t, [site]: '' }));
-      setStatus(site, { ok: false, msg: parsed.error });
+      setToken('');
+      setKeyStatus({ ok: false, msg: parsed.error });
       return;
     }
-    setTokens(t => ({ ...t, [site]: parsed.token }));
-    setStatus(site, { ok: true, msg: '✓ Key found — checking it…' });
-    void lookupGroups(site, parsed.token);
+    setToken(parsed.token);
+    setKeyStatus({ ok: true, msg: '✓ Key found — checking it…' });
+    void lookupGroups(parsed.token);
   }
 
-  // Validate the key server-side and pull the member's groups for the picker.
-  async function lookupGroups(site: SiteKey, token: string) {
+  // Validate the key and pull the member's groups for the picker. One key
+  // works on all three games (shared accounts), so any site validates it.
+  async function lookupGroups(tok: string) {
     setGroupsLoading(true);
     try {
       const res = await fetch('/api/token/groups', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ site, token }),
+        body: JSON.stringify({ site: 'geosports', token: tok }),
       });
       const data = await res.json();
       if (!res.ok) {
-        setTokens(t => ({ ...t, [site]: '' }));
-        setStatus(site, { ok: false, msg: data.error || 'Could not verify this key.' });
+        setToken('');
+        setKeyStatus({ ok: false, msg: data.error || 'Could not verify this key.' });
         return;
       }
-      const label = SITES.find(s => s.key === site)?.label || site;
-      setStatus(site, { ok: true, msg: `✓ ${label} connected` });
+      setKeyStatus({ ok: true, msg: '✓ Key verified — now pick your games and group' });
       const groups: MyGroup[] = data.groups || [];
       setMyGroups(prev => {
         const seen = new Set(prev.map(g => g.code));
         return [...prev, ...groups.filter(g => !seen.has(g.code))];
       });
-      // Auto-select when there is exactly one group and nothing chosen yet.
       setGroupCode(prev => (prev ? prev : groups.length === 1 ? groups[0].code : prev));
     } catch {
-      setStatus(site, { ok: false, msg: 'Network error while checking the key — try again.' });
+      setKeyStatus({ ok: false, msg: 'Network error while checking the key — try again.' });
     } finally {
       setGroupsLoading(false);
     }
   }
 
   // One-tap paste for mobile; falls back to a hint if the browser says no.
-  async function pasteFromClipboard(site: SiteKey) {
+  async function pasteFromClipboard() {
     try {
       const text = await navigator.clipboard.readText();
-      if (text) handlePaste(site, text);
-      else setStatus(site, { ok: false, msg: 'Clipboard is empty — copy the key page first.' });
+      if (text) handlePaste(text);
+      else setKeyStatus({ ok: false, msg: 'Clipboard is empty — copy the key page first.' });
     } catch {
-      setStatus(site, { ok: false, msg: 'Tap the box and paste manually (long-press → Paste).' });
+      setKeyStatus({ ok: false, msg: 'Tap the box and paste manually (long-press → Paste).' });
     }
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError('');
-    if (!anyToken) {
-      setError('Connect at least one game first.');
+    if (!token) {
+      setError('Paste your key first (step 1 and 2).');
+      return;
+    }
+    if (selectedSites.length === 0) {
+      setError('Tick at least one game to track.');
       return;
     }
     if (!groupCode.trim()) {
@@ -118,8 +117,9 @@ export default function Home() {
       return;
     }
     setLoading(true);
+    // Same key for every ticked game — tokens are valid across all three sites.
     const tokenMap: Partial<Record<SiteKey, string>> = {};
-    SITES.forEach(s => { if (tokens[s.key].trim()) tokenMap[s.key] = tokens[s.key].trim(); });
+    selectedSites.forEach(k => { tokenMap[k] = token; });
 
     try {
       const res = await fetch('/api/register', {
@@ -156,86 +156,97 @@ export default function Home() {
 
       <div style={styles.card}>
         <form onSubmit={handleSubmit}>
-          <div style={{ marginBottom: 8 }}>
-            <label style={styles.label}>1 · Connect your games</label>
+          <div style={styles.field}>
+            <div style={styles.stepHead}>
+              <label style={styles.label}>1 · Get your key</label>
+              <button type="button" style={styles.helpToggle} onClick={() => setShowHelp(h => !h)}>
+                {showHelp ? 'Hide help' : 'Help'}
+              </button>
+            </div>
             <p style={styles.hint}>
-              One is enough — you can add the others later from your dashboard. Works on your
-              phone too.
+              Open the key page for any game you&apos;re logged into — one key works for all three.
             </p>
-          </div>
-
-          {SITES.map(s => (
-            <div key={s.key} style={styles.siteCard}>
-              <div style={styles.siteHead}>
-                <span style={styles.siteName}>
-                  <span style={{ marginRight: 6 }}>{s.emoji}</span>{s.label}
-                  <span style={styles.optional}>optional</span>
-                </span>
-                <button
-                  type="button"
-                  style={{ ...styles.helpToggle, color: s.accent }}
-                  onClick={() => setHelpFor(h => (h === s.key ? null : s.key))}
-                >
-                  {helpFor === s.key ? 'Hide help' : 'Help'}
-                </button>
-              </div>
-
-              <div style={styles.keyRow}>
+            <div style={styles.keyLinks}>
+              {SITES.map(s => (
                 <a
+                  key={s.key}
                   href={keyPageUrl(s.host)}
                   target="_blank"
                   rel="noreferrer"
                   style={{ ...styles.keyBtn, borderColor: hexA(s.accent, 0.5), color: s.accent }}
                 >
-                  1. Open my {s.label} key ↗
+                  {s.emoji} {s.label} key ↗
                 </a>
-              </div>
-              <p style={styles.keyHint}>
-                Log in at {s.host} first. The key opens as a page of code — select it all and copy.
-              </p>
-
-              {helpFor === s.key && (
-                <div style={{ ...styles.helpBox, borderColor: hexA(s.accent, 0.3), background: hexA(s.accent, 0.06) }}>
-                  <p style={styles.helpStep}><strong>Phone:</strong> tap-hold the text → Select All → Copy, then use the 📋 button below.</p>
-                  <p style={styles.helpStep}><strong>Computer:</strong> Ctrl/Cmd-A, Ctrl/Cmd-C, then paste below.</p>
-                  <p style={styles.helpStep}><strong>Not logged in?</strong> The key page shows &quot;null&quot; — log in at <a href={`https://${s.host}`} target="_blank" rel="noreferrer" style={{ color: s.accent }}>{s.host}</a> and reopen it.</p>
-                  <p style={styles.helpStep}><strong>Old-school:</strong> pasting the <code style={styles.code}>{s.cookie}</code> cookie value from DevTools still works.</p>
-                </div>
-              )}
-
-              <div style={styles.pasteRow}>
-                <input
-                  style={{
-                    ...styles.input,
-                    flex: 1,
-                    borderColor: pasteStatus[s.key]?.ok
-                      ? hexA(s.accent, 0.6)
-                      : pasteStatus[s.key] ? 'rgba(239,68,68,0.5)' : 'rgba(255,255,255,0.1)',
-                  }}
-                  type="password"
-                  placeholder="2. Paste everything here"
-                  value={pastes[s.key]}
-                  onChange={e => handlePaste(s.key, e.target.value)}
-                />
-                <button
-                  type="button"
-                  title="Paste from clipboard"
-                  style={styles.clipBtn}
-                  onClick={() => pasteFromClipboard(s.key)}
-                >
-                  📋
-                </button>
-              </div>
-              {pasteStatus[s.key] && (
-                <p style={{ ...styles.pasteStatus, color: pasteStatus[s.key]!.ok ? '#86efac' : '#fca5a5' }}>
-                  {pasteStatus[s.key]!.msg}
-                </p>
-              )}
+              ))}
             </div>
-          ))}
 
-          <div style={{ ...styles.field, marginTop: 20 }}>
-            <label style={styles.label}>2 · Pick your group</label>
+            {showHelp && (
+              <div style={styles.helpBox}>
+                <p style={styles.helpStep}><strong>Phone:</strong> tap-hold the text → Select All → Copy, then use the 📋 button below.</p>
+                <p style={styles.helpStep}><strong>Computer:</strong> Ctrl/Cmd-A, Ctrl/Cmd-C, then paste below.</p>
+                <p style={styles.helpStep}><strong>Not logged in?</strong> The key page shows &quot;null&quot; — log in to the game first and reopen it.</p>
+                <p style={styles.helpStep}><strong>Old-school:</strong> pasting a session cookie value from DevTools still works.</p>
+              </div>
+            )}
+          </div>
+
+          <div style={styles.field}>
+            <label style={styles.label}>2 · Paste it here</label>
+            <div style={styles.pasteRow}>
+              <input
+                style={{
+                  ...styles.input,
+                  flex: 1,
+                  borderColor: keyStatus?.ok
+                    ? 'rgba(59,130,246,0.6)'
+                    : keyStatus ? 'rgba(239,68,68,0.5)' : 'rgba(255,255,255,0.1)',
+                }}
+                type="password"
+                placeholder="Paste everything from the key page"
+                value={paste}
+                onChange={e => handlePaste(e.target.value)}
+              />
+              <button type="button" title="Paste from clipboard" style={styles.clipBtn} onClick={pasteFromClipboard}>
+                📋
+              </button>
+            </div>
+            {keyStatus && (
+              <p style={{ ...styles.pasteStatus, color: keyStatus.ok ? '#86efac' : '#fca5a5' }}>
+                {keyStatus.msg}
+              </p>
+            )}
+          </div>
+
+          <div style={styles.field}>
+            <label style={styles.label}>3 · Choose the games your group plays</label>
+            <div style={styles.siteChecks}>
+              {SITES.map(s => (
+                <label
+                  key={s.key}
+                  style={{
+                    ...styles.siteCheck,
+                    borderColor: selected[s.key] ? hexA(s.accent, 0.6) : 'rgba(255,255,255,0.1)',
+                    background: selected[s.key] ? hexA(s.accent, 0.08) : '#080e1a',
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={selected[s.key]}
+                    onChange={() => setSelected(sel => ({ ...sel, [s.key]: !sel[s.key] }))}
+                    style={styles.checkbox}
+                  />
+                  <span>{s.emoji} {s.label}</span>
+                </label>
+              ))}
+            </div>
+            <p style={styles.hint}>
+              Your key connects any of them. Only tick games your group actually plays — the
+              combined Sicko Mode board counts days where someone played every connected game.
+            </p>
+          </div>
+
+          <div style={styles.field}>
+            <label style={styles.label}>4 · Pick your group</label>
             {myGroups.length > 0 ? (
               <div style={styles.groupPick}>
                 {myGroups.map(g => (
@@ -260,13 +271,13 @@ export default function Home() {
               <p style={styles.hint}>
                 {groupsLoading
                   ? 'Finding your groups…'
-                  : anyToken
+                  : token
                     ? 'No groups found on that account — enter your group code below.'
-                    : 'Connect a game above and your groups will appear here.'}
+                    : 'Paste your key above and your groups will appear here.'}
               </p>
             )}
 
-            {(showManualCode || (anyToken && myGroups.length === 0 && !groupsLoading)) ? (
+            {(showManualCode || (token && myGroups.length === 0 && !groupsLoading)) ? (
               <input
                 style={{ ...styles.input, marginTop: 8 }}
                 type="text"
@@ -304,7 +315,7 @@ export default function Home() {
 
           <button
             type="submit"
-            style={{ ...styles.button, opacity: anyToken && groupCode.trim() && !loading ? 1 : 0.6 }}
+            style={{ ...styles.button, opacity: token && selectedSites.length > 0 && groupCode.trim() && !loading ? 1 : 0.6 }}
             disabled={loading}
           >
             {loading ? 'Setting up…' : 'Create My Dashboard →'}
@@ -343,24 +354,22 @@ const styles: Record<string, React.CSSProperties> = {
   subtitle: { fontSize: 15, color: '#6b7a99', marginTop: 8, maxWidth: 360 },
   card: { width: '100%', maxWidth: 440, background: '#0f1826', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 16, padding: '28px 24px' },
   field: { marginBottom: 20 },
+  stepHead: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
   label: { display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 6 },
   input: { width: '100%', background: '#080e1a', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, padding: '10px 14px', color: '#f0f4ff', fontSize: 14, outline: 'none' },
   hint: { fontSize: 11, color: '#6b7a99', marginTop: 5 },
   hintLink: { color: '#6b7a99', textDecoration: 'underline' },
-  siteCard: { background: '#0b1320', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 10, padding: '12px 12px 14px', marginBottom: 10 },
-  siteHead: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
-  siteName: { fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center' },
-  optional: { fontSize: 10, fontWeight: 500, color: '#6b7a99', marginLeft: 8, textTransform: 'uppercase', letterSpacing: '0.06em' },
-  helpToggle: { background: 'none', border: 'none', fontSize: 11, cursor: 'pointer', padding: 0 },
-  helpBox: { border: '1px solid', borderRadius: 8, padding: '10px 12px', marginBottom: 10 },
+  helpToggle: { background: 'none', border: 'none', fontSize: 11, cursor: 'pointer', padding: 0, color: '#6b7a99' },
+  helpBox: { border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.03)', borderRadius: 8, padding: '10px 12px', marginTop: 10 },
   helpStep: { fontSize: 12, lineHeight: 1.6, color: '#c7d3f0', marginBottom: 3 },
-  code: { background: 'rgba(255,255,255,0.08)', borderRadius: 3, padding: '1px 4px', fontSize: 11, fontFamily: 'monospace' },
-  keyRow: { display: 'flex', marginBottom: 4 },
-  keyBtn: { display: 'block', width: '100%', textAlign: 'center', border: '1px solid', borderRadius: 8, padding: '9px 12px', fontSize: 13, fontWeight: 600, textDecoration: 'none', background: 'rgba(255,255,255,0.02)' },
-  keyHint: { fontSize: 11, color: '#6b7a99', margin: '0 0 8px' },
+  keyLinks: { display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' },
+  keyBtn: { flex: '1 1 30%', textAlign: 'center', border: '1px solid', borderRadius: 8, padding: '8px 6px', fontSize: 12, fontWeight: 600, textDecoration: 'none', background: 'rgba(255,255,255,0.02)', whiteSpace: 'nowrap' },
   pasteRow: { display: 'flex', gap: 6 },
   clipBtn: { background: '#080e1a', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, padding: '0 12px', fontSize: 15, cursor: 'pointer', color: '#f0f4ff' },
   pasteStatus: { fontSize: 11, marginTop: 5 },
+  siteChecks: { display: 'flex', gap: 6, flexWrap: 'wrap' },
+  siteCheck: { flex: '1 1 30%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, border: '1px solid', borderRadius: 8, padding: '9px 6px', fontSize: 12, fontWeight: 600, color: '#f0f4ff', cursor: 'pointer', whiteSpace: 'nowrap' },
+  checkbox: { accentColor: '#3b82f6', cursor: 'pointer' },
   groupPick: { display: 'flex', flexDirection: 'column', gap: 6, marginTop: 4 },
   groupBtn: { display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 2, border: '1px solid', borderRadius: 8, padding: '9px 12px', fontSize: 13, color: '#f0f4ff', cursor: 'pointer', textAlign: 'left' },
   groupMeta: { fontSize: 11, color: '#6b7a99' },

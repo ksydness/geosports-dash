@@ -114,6 +114,19 @@ cookie name candidates, label/accent/emoji).
   `siteFetch()` tries each candidate cookie name (`__Secure-<site>.session_token`,
   falling back to the geosports prefix) and memoises the one that authenticates,
   so a wrong prefix self-corrects instead of being mistaken for an expired token.
+- **…but raw tokens are cross-site (verified 2026-07-31)**: the three domains
+  share ONE server-side session store, so a RAW session token from any game
+  authenticates on all three via `Authorization: Bearer`. The domain decides
+  the game context (verified: geosports token on geohistory.gg returned the
+  correct geohistory scores + `gameId: "geohistory"` from /api/streak). BROWSER
+  sessions stay per-domain (cookies don't travel), so users can still be logged
+  into one game and not another. Consequence: cross-pasting a key into the
+  wrong game's box connects fine, and one key COULD connect all three games.
+  This looks like an accident of the shared backend — if GeoSports ever locks
+  tokens to their origin site, cross-connected sites will start 401ing, sync's
+  AuthError handling deactivates them, and users see the reconnect banner
+  (graceful). Don't build anything that depends on cross-site tokens staying
+  valid.
 - **Registration** (`/api/register`) takes a `{ tokens: { site: token } }` map —
   one site is enough; more can be added later from the dashboard's ＋ / connect
   modal (same endpoint, upserts per `group_code+site`). Legacy `{ session_token }`
@@ -128,6 +141,19 @@ cookie name candidates, label/accent/emoji).
   values via the cookie-candidate path. `POST /api/token/groups {site, token}`
   validates a key and returns the member's groups (from the site's
   `GET /api/groups`) to power the registration group picker.
+- **One key, opt-in games (2026-07-31, later)**: because raw tokens are
+  cross-site, registration asks for ONE key and offers checkboxes for which
+  games to track (same token stored per selected site; only geosports is
+  pre-ticked — connecting a game nobody plays would empty Sicko Mode boards).
+  On existing dashboards, `POST /api/sites/connect {group_code, site}` connects
+  or reconnects a game with NO new key: it revalidates a stored donor token
+  (active rows first, geosports preferred) against the target site and saves
+  it, then backfills. The ＋ modal offers "⚡ connect instantly" first and only
+  falls back to the key-page paste flow when the server answers
+  `needsKey: true` (which is what will happen if GeoSports ever locks tokens
+  to their origin site — the flow degrades gracefully by design). Note this
+  means anyone with the dashboard URL can connect/heal games using the stored
+  key; acceptable because it only ever exposes the same group's scores.
 - **Dashboard**: a site switcher sits above the 5 tabs. Selecting a site filters
   the score array to that site; **Sicko Mode** (shown when ≥2 sites connected)
   sums each player's daily score across sites by `user_id` (totals only — raw
@@ -151,6 +177,7 @@ app/
     scores/[group_code]/route.ts  # GET: return scores + auto-sync if stale >10min
     questions/route.ts            # GET: proxy GeoSports public questions endpoint
     token/groups/route.ts         # POST: validate a session key, list the member's groups (connect flow)
+    sites/connect/route.ts        # POST: one-click connect/reconnect a game reusing a stored donor key
     cron/sync/route.ts            # GET: daily cron — sync all active groups (full backfill for groups <48h old)
     backfill/[group_code]/route.ts # GET/POST: re-run 30-day backfill (public, 24h throttle via groups.last_backfilled_at; CRON_SECRET bypasses)
 lib/
