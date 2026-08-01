@@ -24,7 +24,7 @@ const GROUP_CODE_RE = /^[A-Z0-9]{3,10}$/;
  * `{ needsKey: true }` so the UI falls back to the paste flow.
  */
 export async function POST(req: NextRequest) {
-  let body: { group_code?: string; site?: string };
+  let body: { group_code?: string; site?: string; dry_run?: boolean };
   try {
     body = await req.json();
   } catch {
@@ -78,6 +78,11 @@ export async function POST(req: NextRequest) {
       await fetchGroupInfo(code, token, target);
     } catch {
       continue; // this donor doesn't authenticate on the target — try next
+    }
+
+    // Dry run: report that the connect WOULD succeed, but save nothing.
+    if (body.dry_run) {
+      return NextResponse.json({ ok: true, dryRun: true, site: target, via: donor.site });
     }
 
     const { error: upErr } = await supabase.from('group_sites').upsert(
