@@ -12,6 +12,24 @@ export const maxDuration = 60;
 const GROUP_CODE_RE = /^[A-Z0-9]{3,10}$/;
 
 /**
+ * Extract the raw session id from a legacy signed-cookie value
+ * (`<raw>.<signature>`, possibly URL-encoded). Returns null when the stored
+ * token is already raw or doesn't look like a signed value.
+ */
+function rawTokenInside(stored: string): string | null {
+  let t = stored;
+  try {
+    t = decodeURIComponent(stored);
+  } catch {
+    // not URL-encoded — use as-is
+  }
+  const dot = t.indexOf('.');
+  if (dot === -1) return null;
+  const raw = t.slice(0, dot);
+  return /^[A-Za-z0-9]{20,64}$/.test(raw) ? raw : null;
+}
+
+/**
  * POST { group_code, site } → connect (or reconnect) a game using a key the
  * dashboard ALREADY has on file for another game. Session tokens are valid
  * across all three sites (shared backend, verified 2026-07-31), so adding a
@@ -67,45 +85,55 @@ export async function POST(req: NextRequest) {
   }
 
   for (const donor of donors) {
-    let token: string;
+    let stored: string;
     try {
-      token = decrypt(donor.session_token);
+      stored = decrypt(donor.session_token);
     } catch {
-      continue; // corrupt/legacy row — try the next donor
-    }
-    try {
-      // Validates the donor key against the TARGET game (throws if rejected).
-      await fetchGroupInfo(code, token, target);
-    } catch {
-      continue; // this donor doesn't authenticate on the target — try next
+      continue; // corrupt row — try the next donor
     }
 
-    // Dry run: report that the connect WOULD succeed, but save nothing.
-    if (body.dry_run) {
-      return NextResponse.json({ ok: true, dryRun: true, site: target, via: donor.site });
+    // Legacy cookie VALUES are `<raw>.<domain-signature>` (sometimes
+    // URL-encoded) and the signature is site-locked — but the raw session id
+    // inside is cross-site. Try the stored token as-is, then the raw part.
+    const candidates = [stored];
+    const raw = rawTokenInside(stored);
+    if (raw) candidates.push(raw);
+
+    for (const candidate of candidates) {
+      try {
+        // Validates the candidate against the TARGET game (throws if rejected).
+        await fetchGroupInfo(code, candidate, target);
+      } catch {
+        continue; // rejected on the target — try the next candidate/donor
+      }
+
+      // Dry run: report that the connect WOULD succeed, but save nothing.
+      if (body.dry_run) {
+        return NextResponse.json({ ok: true, dryRun: true, site: target, via: donor.site, upgraded: candidate !== stored });
+      }
+
+      const { error: upErr } = await supabase.from('group_sites').upsert(
+        {
+          group_code: code,
+          site: target,
+          session_token: encrypt(candidate),
+          active: true,
+        },
+        { onConflict: 'group_code,site' }
+      );
+      if (upErr) {
+        console.error('sites/connect: upsert failed:', upErr);
+        return NextResponse.json({ error: 'Failed to save connection' }, { status: 500 });
+      }
+
+      waitUntil(
+        backfillGroup(code, candidate, target).catch(err =>
+          console.error(`Instant-connect backfill failed for ${code}/${target}:`, err)
+        )
+      );
+
+      return NextResponse.json({ ok: true, site: target, via: donor.site, upgraded: candidate !== stored });
     }
-
-    const { error: upErr } = await supabase.from('group_sites').upsert(
-      {
-        group_code: code,
-        site: target,
-        session_token: encrypt(token),
-        active: true,
-      },
-      { onConflict: 'group_code,site' }
-    );
-    if (upErr) {
-      console.error('sites/connect: upsert failed:', upErr);
-      return NextResponse.json({ error: 'Failed to save connection' }, { status: 500 });
-    }
-
-    waitUntil(
-      backfillGroup(code, token, target).catch(err =>
-        console.error(`Instant-connect backfill failed for ${code}/${target}:`, err)
-      )
-    );
-
-    return NextResponse.json({ ok: true, site: target, via: donor.site });
   }
 
   return NextResponse.json(
